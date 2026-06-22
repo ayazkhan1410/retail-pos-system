@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'auth.apps.AuthConfig',
     'inventory.apps.InventoryConfig',
+    'suppliers.apps.SuppliersConfig',
 ]
 
 MIDDLEWARE = [

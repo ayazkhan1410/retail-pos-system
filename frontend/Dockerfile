@@ -1,15 +1,24 @@
-# Frontend production image
+# Build stage
 FROM node:20-alpine AS build
+
 WORKDIR /app
-COPY frontend/package.json frontend/package-lock.json* ./
+
+COPY package.json package-lock.json* ./
 RUN npm ci
-COPY frontend/ .
+
+COPY . .
+
 ARG VITE_API_BASE_URL=http://localhost:8000/api/v1
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
 RUN npm run build
 
-FROM nginx:alpine
+# Production stage
+FROM nginx:alpine AS production
+
 COPY --from=build /app/dist /usr/share/nginx/html
-COPY infra/nginx/default.conf /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
 EXPOSE 80
+
 CMD ["nginx", "-g", "daemon off;"]

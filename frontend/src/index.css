@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-brand-200 dark:border-brand-800;
+  }
+
+  body {
+    @apply bg-brand-100 text-brand-900 antialiased dark:bg-brand-950 dark:text-brand-50;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  #root {
+    @apply min-h-screen;
+  }
+}
+
+@layer components {
+  .focus-ring {
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 dark:focus-visible:ring-accent-glow dark:focus-visible:ring-offset-brand-950;
+  }
+
+  .glass {
+    @apply border border-white/20 bg-white/70 backdrop-blur-xl dark:border-white/10 dark:bg-brand-900/70;
+  }
+
+  .glass-dark {
+    @apply border border-white/10 bg-brand-900/60 backdrop-blur-xl;
+  }
+
+  .page-bg {
+    @apply bg-mesh-light dark:bg-mesh-dark;
+  }
+
+  .gradient-border {
+    @apply relative before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] before:p-px before:content-[''] before:[background:linear-gradient(135deg,rgb(1_65_28/0.3),transparent_50%,rgb(0_0_0/0.05))];
+  }
+
+  .text-gradient {
+    @apply bg-gradient-to-r from-brand-900 to-brand-600 bg-clip-text text-transparent dark:from-white dark:to-brand-400;
+  }
+
+  .kpi-shine {
+    background: linear-gradient(105deg, transparent 40%, rgb(255 255 255 / 0.08) 50%, transparent 60%);
+    background-size: 200% 100%;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-brand-300/80 dark:bg-brand-700/80;
+}
+
+::selection {
+  @apply bg-accent/20 text-brand-900 dark:text-white;
+}

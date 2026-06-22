@@ -115,7 +115,7 @@ export default function PurchasesPage() {
           </div>
           {selectedSupplier && (
             <div className="mt-3 flex flex-wrap gap-4 rounded-xl bg-accent/5 p-3 text-sm dark:bg-accent/10">
-              <span><Building2 className="mr-1 inline h-4 w-4 text-accent" />{selectedSupplier.contactPerson}</span>
+              <span><Building2 className="mr-1 inline h-4 w-4 text-accent" />{selectedSupplier.name}</span>
               <span>{selectedSupplier.phone}</span>
               <span>{selectedSupplier.city}</span>
               {selectedSupplier.ntn && <span>NTN: {selectedSupplier.ntn}</span>}

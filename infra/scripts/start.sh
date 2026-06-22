@@ -11,7 +11,7 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-docker compose up --build -d
+docker compose up -d
 
 # shellcheck disable=SC1091
 . ./.env

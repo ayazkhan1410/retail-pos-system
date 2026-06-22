@@ -34,7 +34,6 @@ export const MOCK_SUPPLIERS: Supplier[] = [
   {
     id: '1',
     name: 'Metro Cash & Carry',
-    contactPerson: 'Ahmed Khan',
     phone: '+92 300 1234567',
     email: 'orders@metro.pk',
     address: 'Thokar Niaz Baig, Multan Road',
@@ -51,7 +50,6 @@ export const MOCK_SUPPLIERS: Supplier[] = [
   {
     id: '2',
     name: 'Imtiaz Super Market',
-    contactPerson: 'Sara Malik',
     phone: '+92 321 9876543',
     email: 'supply@imtiaz.pk',
     address: 'DHA Phase 5, Main Boulevard',
@@ -67,7 +65,6 @@ export const MOCK_SUPPLIERS: Supplier[] = [
   {
     id: '3',
     name: 'Dairyland Distributors',
-    contactPerson: 'Bilal Hussain',
     phone: '+92 333 5551234',
     email: 'sales@dairyland.pk',
     address: 'Ferozepur Road, Near Kalma Chowk',

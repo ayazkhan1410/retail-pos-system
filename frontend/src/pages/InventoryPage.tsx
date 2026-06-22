@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Plus, Search, Pencil, Trash2, Package, AlertTriangle, Filter, X } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, Package, AlertTriangle, Filter, X, Printer } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
 import { Card, Button, Input, Badge, StockBadge, Modal, Select } from '@/components/ui';
 import { formatCurrency, cn } from '@/utils';
@@ -14,8 +14,9 @@ import {
   type StockFilter,
   type ExpiryFilter,
 } from '@/utils/inventoryUtils';
-import ProductForm from '@/components/inventory/ProductForm';
-import { useInventoryStore, type ProductFormData } from '@/store';
+import ProductForm, { type ProductFormSubmitResult } from '@/components/inventory/ProductForm';
+import LabelPrintModal from '@/components/inventory/LabelPrintModal';
+import { useInventoryStore } from '@/store';
 import { useTranslation } from '@/i18n';
 import type { Product } from '@/types';
 
@@ -42,6 +43,8 @@ export default function InventoryPage() {
   const [filters, setFilters] = useState<InventoryFilters>(emptyInventoryFilters);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [labelProduct, setLabelProduct] = useState<Product | null>(null);
+  const [labelModalOpen, setLabelModalOpen] = useState(false);
 
   const stats = useMemo(() => countByStockStatus(products), [products]);
   const filtered = useMemo(() => filterProducts(products, filters), [products, filters]);
@@ -80,14 +83,26 @@ export default function InventoryPage() {
     }));
   };
 
-  const handleSubmit = (data: ProductFormData) => {
+  const handleSubmit = (data: ProductFormSubmitResult) => {
+    const { shouldPrintLabel, ...productData } = data;
     if (editingProduct) {
-      updateProduct(editingProduct.id, data);
+      updateProduct(editingProduct.id, productData);
+      setModalOpen(false);
+      setEditingProduct(null);
     } else {
-      addProduct(data);
+      const newProduct = addProduct(productData);
+      setModalOpen(false);
+      setEditingProduct(null);
+      if (shouldPrintLabel) {
+        setLabelProduct(newProduct);
+        setLabelModalOpen(true);
+      }
     }
-    setModalOpen(false);
-    setEditingProduct(null);
+  };
+
+  const openLabelPrint = (product: Product) => {
+    setLabelProduct(product);
+    setLabelModalOpen(true);
   };
 
   const statCards = [
@@ -246,6 +261,9 @@ export default function InventoryPage() {
                       <td className="px-4 py-3 sm:px-6"><StockBadge status={status} /></td>
                       <td className="px-4 py-3 sm:px-6">
                         <div className="flex gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => openLabelPrint(product)} title={t('inventory.printLabel')}>
+                            <Printer className="h-3.5 w-3.5" />
+                          </Button>
                           <Button variant="ghost" size="sm" onClick={() => { setEditingProduct(product); setModalOpen(true); }}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
@@ -291,6 +309,15 @@ export default function InventoryPage() {
       >
         <ProductForm product={editingProduct} onSubmit={handleSubmit} />
       </Modal>
+
+      <LabelPrintModal
+        product={labelProduct}
+        open={labelModalOpen}
+        onClose={() => {
+          setLabelModalOpen(false);
+          setLabelProduct(null);
+        }}
+      />
     </>
   );
 }

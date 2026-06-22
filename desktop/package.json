@@ -1,0 +1,16 @@
+{
+  "name": "smartshop-desktop",
+  "version": "0.1.0",
+  "description": "SmartShop POS desktop launcher",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "postinstall": "node scripts/install-electron.js",
+    "install:electron": "node scripts/install-electron.js",
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.2.1"
+  }
+}

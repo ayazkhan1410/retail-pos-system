@@ -245,11 +245,33 @@ export const en = {
     system: 'System',
     apiStatus: 'API Status',
     connected: 'Connected',
+    disconnected: 'Disconnected',
+    apiChecking: 'Checking...',
+    retryApi: 'Retry',
+    apiDisconnectedHint: 'Cannot reach backend. Start Django on http://localhost:8000',
     version: 'Version',
     backupDatabase: 'Backup Database',
     checkUpdates: 'Check for Updates',
+    backupSuccess: 'Backup saved: {{file}} ({{size}})',
+    backupFailed: 'Backup failed. Make sure Docker stack and PostgreSQL are running.',
+    upToDate: 'You are on the latest version.',
+    updateCheckFailed: 'Could not check for updates.',
+    updateAvailableTitle: 'Update Available',
+    updateAvailableBody: 'Version {{latest}} is available (you have {{current}}). Install now?',
+    updateAvailableBanner: 'A new update is available — version {{latest}}.',
+    updateShowDetails: 'View update',
+    updateInstallingTitle: 'Installing update…',
+    updateInstallingBody: 'Please wait while SmartShop downloads and applies the latest version. Do not close the app.',
+    updateLater: 'Not Now',
+    updateNow: 'Update Now',
+    updateDesktopOnly: 'Open the SmartShop desktop app to install updates automatically.',
+    updateFailed: 'Update failed. Please try again or contact support.',
     justNow: 'Just now',
   },
 } as const;
 
-export type TranslationKeys = typeof en;
+type DeepStringMap<T> = {
+  [K in keyof T]: T[K] extends string ? string : DeepStringMap<T[K]>;
+};
+
+export type TranslationKeys = DeepStringMap<typeof en>;

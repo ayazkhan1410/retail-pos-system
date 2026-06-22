@@ -179,3 +179,10 @@ frontend/dist/
 frontend/.env
 *.local
 .DS_Store
+
+# Database backups (local / client)
+backups/*
+!backups/.gitkeep
+
+# Desktop
+desktop/node_modules/

@@ -1,13 +1,134 @@
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Card, CardHeader, CardTitle, Button, Input, Select, Badge } from '@/components/ui';
+import { Card, CardHeader, CardTitle, Button, Input, Select, Badge, Modal } from '@/components/ui';
 import { useThemeStore } from '@/store';
 import { useTranslation } from '@/i18n';
+import { healthApi, systemApi, type UpdateCheckResponse } from '@/services';
 import LanguageToggle from '@/components/layout/LanguageToggle';
-import { Shield, Store, Bell, Database, Moon, Sun, MapPin, Languages } from 'lucide-react';
+import '@/types/desktop';
+import { Shield, Store, Bell, Database, Moon, Sun, MapPin, Languages, RefreshCw } from 'lucide-react';
+
+type ApiHealthState = 'checking' | 'connected' | 'disconnected';
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function SettingsPage() {
   const { theme, setTheme } = useThemeStore();
   const { t, language, setLanguage } = useTranslation();
+  const [apiHealth, setApiHealth] = useState<ApiHealthState>('checking');
+  const [apiMessage, setApiMessage] = useState('');
+  const [appVersion, setAppVersion] = useState('0.1.0');
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [backupMessage, setBackupMessage] = useState('');
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResponse | null>(null);
+  const [updateApplying, setUpdateApplying] = useState(false);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [statusMessage, setStatusMessage] = useState('');
+  const updateDismissedRef = useRef(false);
+
+  useEffect(() => {
+    updateDismissedRef.current = updateDismissed;
+  }, [updateDismissed]);
+
+  const checkApiHealth = useCallback(async () => {
+    setApiHealth('checking');
+    setApiMessage('');
+    try {
+      const { data } = await healthApi.check();
+      setApiHealth('connected');
+      setApiMessage(data.message);
+    } catch {
+      setApiHealth('disconnected');
+      setApiMessage('');
+    }
+  }, []);
+
+  const handleCheckUpdates = useCallback(async (options?: { auto?: boolean }) => {
+    const isAuto = options?.auto ?? false;
+    setUpdateLoading(true);
+    if (!isAuto) setStatusMessage('');
+    try {
+      const { data } = await systemApi.checkUpdates();
+      if (data.update_available) {
+        setUpdateInfo(data);
+        if (!isAuto || !updateDismissedRef.current) {
+          setUpdateModalOpen(true);
+        }
+      } else {
+        setUpdateInfo(null);
+        setUpdateDismissed(false);
+        if (!isAuto) {
+          setStatusMessage(t('settings.upToDate'));
+        }
+      }
+    } catch {
+      if (!isAuto) {
+        setStatusMessage(t('settings.updateCheckFailed'));
+      }
+    } finally {
+      setUpdateLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    checkApiHealth();
+    systemApi.getVersion().then(({ data }) => setAppVersion(data.version)).catch(() => undefined);
+    handleCheckUpdates({ auto: true });
+  }, [checkApiHealth, handleCheckUpdates]);
+
+  const handleBackup = async () => {
+    setBackupLoading(true);
+    setBackupMessage('');
+    try {
+      const { data } = await systemApi.backupDatabase();
+      setBackupMessage(
+        t('settings.backupSuccess', {
+          file: data.filename ?? '',
+          size: formatBytes(data.size_bytes ?? 0),
+        }),
+      );
+      if (window.smartshop?.openBackupsFolder) {
+        await window.smartshop.openBackupsFolder();
+      }
+    } catch {
+      setBackupMessage(t('settings.backupFailed'));
+    } finally {
+      setBackupLoading(false);
+    }
+  };
+
+  const handleDismissUpdate = () => {
+    if (updateApplying) return;
+    setUpdateModalOpen(false);
+    setUpdateDismissed(true);
+  };
+
+  const handleApplyUpdate = async () => {
+    setUpdateApplying(true);
+    try {
+      if (window.smartshop?.applyUpdate) {
+        const result = await window.smartshop.applyUpdate();
+        setStatusMessage(result.message);
+        if (result.success) {
+          setUpdateDismissed(false);
+          setUpdateInfo(null);
+          setTimeout(() => window.location.reload(), 2000);
+          return;
+        }
+      } else {
+        setStatusMessage(t('settings.updateDesktopOnly'));
+      }
+    } catch {
+      setStatusMessage(t('settings.updateFailed'));
+    }
+    setUpdateApplying(false);
+  };
 
   return (
     <>
@@ -138,20 +259,120 @@ export default function SettingsPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-xl border border-brand-100 p-4 dark:border-brand-800">
                 <p className="text-sm text-brand-500">{t('settings.apiStatus')}</p>
-                <Badge variant="success" className="mt-2">{t('settings.connected')}</Badge>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <Badge
+                    variant={
+                      apiHealth === 'connected'
+                        ? 'success'
+                        : apiHealth === 'disconnected'
+                          ? 'danger'
+                          : 'warning'
+                    }
+                  >
+                    {apiHealth === 'checking'
+                      ? t('settings.apiChecking')
+                      : apiHealth === 'connected'
+                        ? t('settings.connected')
+                        : t('settings.disconnected')}
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={checkApiHealth}
+                    disabled={apiHealth === 'checking'}
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${apiHealth === 'checking' ? 'animate-spin' : ''}`} />
+                    {t('settings.retryApi')}
+                  </Button>
+                </div>
+                {apiMessage && (
+                  <p className="mt-2 text-xs text-brand-500">{apiMessage}</p>
+                )}
+                {apiHealth === 'disconnected' && !apiMessage && (
+                  <p className="mt-2 text-xs text-brand-500">{t('settings.apiDisconnectedHint')}</p>
+                )}
               </div>
               <div className="rounded-xl border border-brand-100 p-4 dark:border-brand-800">
                 <p className="text-sm text-brand-500">{t('settings.version')}</p>
-                <p className="mt-1 font-semibold">v0.1.0 · {t('common.pakistan')}</p>
+                <p className="mt-1 font-semibold">v{appVersion} · {t('common.pakistan')}</p>
               </div>
             </div>
-            <div className="mt-4 flex gap-3">
-              <Button variant="outline" size="sm">{t('settings.backupDatabase')}</Button>
-              <Button variant="outline" size="sm">{t('settings.checkUpdates')}</Button>
+            {backupMessage && (
+              <p className="mt-3 text-sm text-brand-600 dark:text-brand-300">{backupMessage}</p>
+            )}
+            {statusMessage && (
+              <p className="mt-3 text-sm text-brand-600 dark:text-brand-300">{statusMessage}</p>
+            )}
+            {updateInfo?.update_available && updateDismissed && !updateModalOpen && (
+              <div className="mt-3 flex flex-col gap-2 rounded-xl border border-accent/30 bg-accent/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-brand-700 dark:text-brand-200">
+                  {t('settings.updateAvailableBanner', {
+                    latest: updateInfo.latest_version,
+                  })}
+                </p>
+                <Button variant="accent" size="sm" onClick={() => setUpdateModalOpen(true)}>
+                  {t('settings.updateShowDetails')}
+                </Button>
+              </div>
+            )}
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Button variant="outline" size="sm" onClick={handleBackup} loading={backupLoading}>
+                {t('settings.backupDatabase')}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => handleCheckUpdates()} loading={updateLoading}>
+                {t('settings.checkUpdates')}
+              </Button>
             </div>
           </Card>
         </div>
       </main>
+
+      <Modal
+        open={updateModalOpen}
+        onClose={handleDismissUpdate}
+        preventClose={updateApplying}
+        title={
+          updateApplying
+            ? t('settings.updateInstallingTitle')
+            : t('settings.updateAvailableTitle')
+        }
+        size="sm"
+        footer={
+          updateApplying ? undefined : (
+            <>
+              <Button variant="outline" onClick={handleDismissUpdate}>
+                {t('settings.updateLater')}
+              </Button>
+              <Button variant="accent" onClick={handleApplyUpdate}>
+                {t('settings.updateNow')}
+              </Button>
+            </>
+          )
+        }
+      >
+        {updateApplying ? (
+          <div className="flex flex-col items-center gap-4 py-2 text-center">
+            <RefreshCw className="h-10 w-10 animate-spin text-accent" />
+            <p className="text-sm text-brand-600 dark:text-brand-300">
+              {t('settings.updateInstallingBody')}
+            </p>
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-brand-600 dark:text-brand-300">
+              {t('settings.updateAvailableBody', {
+                current: updateInfo?.current_version ?? appVersion,
+                latest: updateInfo?.latest_version ?? '',
+              })}
+            </p>
+            {updateInfo?.release_notes && (
+              <p className="mt-3 rounded-xl bg-brand-50 p-3 text-xs text-brand-500 dark:bg-brand-800/40">
+                {updateInfo.release_notes}
+              </p>
+            )}
+          </>
+        )}
+      </Modal>
     </>
   );
 }

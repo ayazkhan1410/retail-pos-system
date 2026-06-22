@@ -1,0 +1,9 @@
+venv
+**/__pycache__
+**/*.pyc
+.git
+.cursor
+node_modules
+frontend/node_modules
+frontend/dist
+docs/video-frames

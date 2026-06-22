@@ -264,6 +264,7 @@ export const ur: TranslationKeys = {
     updateShowDetails: 'اپڈیٹ دیکھیں',
     updateInstallingTitle: 'اپڈیٹ انسٹال ہو رہا ہے…',
     updateInstallingBody: 'براہ کرم انتظار کریں۔ SmartShop تازہ ترین ورژن لاگو کر رہا ہے۔ ایپ بند نہ کریں۔',
+    updateProgressStart: 'اپڈیٹ تیار ہو رہی ہے…',
     updateLater: 'بعد میں',
     updateNow: 'ابھی اپڈیٹ کریں',
     updateDesktopOnly: 'خودکار اپڈیٹ کے لیے SmartShop ڈیسک ٹاپ ایپ کھولیں۔',

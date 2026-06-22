@@ -1,6 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useTheme } from '@/hooks/useTheme';
-import { useLanguage } from '@/hooks/useLanguage';
+import { useTheme, useLanguage } from '@/hooks';
 import DashboardLayout from '@/layouts/DashboardLayout';
 import POSLayout from '@/layouts/POSLayout';
 import DashboardPage from '@/pages/DashboardPage';

@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { usePOSStore, useInventoryStore } from '@/store';
 import { useKeyboardShortcut } from '@/hooks';
-import { Button, Badge } from '@/components/ui';
+import { Button } from '@/components/ui';
 import { PRODUCT_CATEGORIES } from '@/utils/mockData';
 import { formatCurrency, cn } from '@/utils';
 import { useTranslation } from '@/i18n';

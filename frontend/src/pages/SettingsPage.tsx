@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Card, CardHeader, CardTitle, Button, Input, Select, Badge, Modal } from '@/components/ui';
+import { Card, CardHeader, CardTitle, Button, Input, Select, Badge, Modal, ProgressPanel } from '@/components/ui';
 import { useThemeStore } from '@/store';
 import { useTranslation } from '@/i18n';
 import { healthApi, systemApi, type UpdateCheckResponse } from '@/services';
@@ -28,6 +28,7 @@ export default function SettingsPage() {
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateCheckResponse | null>(null);
   const [updateApplying, setUpdateApplying] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState({ percent: 0, message: '' });
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const updateDismissedRef = useRef(false);
@@ -79,8 +80,22 @@ export default function SettingsPage() {
   useEffect(() => {
     checkApiHealth();
     systemApi.getVersion().then(({ data }) => setAppVersion(data.version)).catch(() => undefined);
+  }, [checkApiHealth]);
+
+  useEffect(() => {
     handleCheckUpdates({ auto: true });
-  }, [checkApiHealth, handleCheckUpdates]);
+    // Auto-check once on mount only — avoid re-running when callbacks change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = window.smartshop?.onUpdateProgress?.((payload) => {
+      setUpdateProgress(payload);
+    });
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
 
   const handleBackup = async () => {
     setBackupLoading(true);
@@ -111,6 +126,7 @@ export default function SettingsPage() {
 
   const handleApplyUpdate = async () => {
     setUpdateApplying(true);
+    setUpdateProgress({ percent: 0, message: t('settings.updateProgressStart') });
     try {
       if (window.smartshop?.applyUpdate) {
         const result = await window.smartshop.applyUpdate();
@@ -118,7 +134,8 @@ export default function SettingsPage() {
         if (result.success) {
           setUpdateDismissed(false);
           setUpdateInfo(null);
-          setTimeout(() => window.location.reload(), 2000);
+          setUpdateModalOpen(false);
+          setTimeout(() => window.location.reload(), 1500);
           return;
         }
       } else {
@@ -128,6 +145,7 @@ export default function SettingsPage() {
       setStatusMessage(t('settings.updateFailed'));
     }
     setUpdateApplying(false);
+    setUpdateProgress({ percent: 0, message: '' });
   };
 
   return (
@@ -351,12 +369,11 @@ export default function SettingsPage() {
         }
       >
         {updateApplying ? (
-          <div className="flex flex-col items-center gap-4 py-2 text-center">
-            <RefreshCw className="h-10 w-10 animate-spin text-accent" />
-            <p className="text-sm text-brand-600 dark:text-brand-300">
-              {t('settings.updateInstallingBody')}
-            </p>
-          </div>
+          <ProgressPanel
+            percent={updateProgress.percent}
+            label={updateProgress.message || t('settings.updateInstallingTitle')}
+            sublabel={t('settings.updateInstallingBody')}
+          />
         ) : (
           <>
             <p className="text-sm text-brand-600 dark:text-brand-300">

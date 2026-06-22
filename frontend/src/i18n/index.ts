@@ -1,3 +1,4 @@
+import { useCallback } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { en } from './locales/en';
@@ -54,8 +55,11 @@ export function translate(
 export function useTranslation() {
   const { language, setLanguage, toggleLanguage } = useLanguageStore();
 
-  const t = (key: string, params?: Record<string, string | number>) =>
-    translate(language, key, params);
+  const t = useCallback(
+    (key: string, params?: Record<string, string | number>) =>
+      translate(language, key, params),
+    [language],
+  );
 
   return { t, language, setLanguage, toggleLanguage };
 }

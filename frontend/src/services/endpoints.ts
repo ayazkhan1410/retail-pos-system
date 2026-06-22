@@ -1,7 +1,38 @@
 import api from './api';
 
+export interface HealthCheckResponse {
+  status: string;
+  message: string;
+}
+
 export const healthApi = {
-  check: () => api.get('/health'),
+  check: () => api.get<HealthCheckResponse>('/health-check/'),
+};
+
+export interface AppVersionResponse {
+  version: string;
+}
+
+export interface UpdateCheckResponse {
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  release_notes: string;
+}
+
+export interface BackupResponse {
+  status: string;
+  message: string;
+  filename?: string;
+  path?: string;
+  size_bytes?: number;
+  created_at?: string;
+}
+
+export const systemApi = {
+  getVersion: () => api.get<AppVersionResponse>('/system/version/'),
+  checkUpdates: () => api.get<UpdateCheckResponse>('/system/check-updates/'),
+  backupDatabase: () => api.post<BackupResponse>('/system/backup/'),
 };
 
 export const productsApi = {

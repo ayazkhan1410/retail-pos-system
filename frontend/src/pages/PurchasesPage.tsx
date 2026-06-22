@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Building2, ExternalLink, Save } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Card, CardHeader, CardTitle, Button, Input, Select } from '@/components/ui';
+import { Card, CardTitle, Button, Input, Select } from '@/components/ui';
 import { useSupplierStore } from '@/store';
 import { useTranslation } from '@/i18n';
 import { formatCurrency } from '@/utils';
@@ -38,7 +38,7 @@ export default function PurchasesPage() {
   const [type, setType] = useState<'credit' | 'cash'>('credit');
   const [autoRates, setAutoRates] = useState(true);
   const [filterSupplierInventory, setFilterSupplierInventory] = useState(false);
-  const [lines, setLines] = useState<GRNLine[]>(SAMPLE_LINES);
+  const [lines] = useState<GRNLine[]>(SAMPLE_LINES);
   const [flatDisc, setFlatDisc] = useState(5000);
   const [discPercent, setDiscPercent] = useState(0);
   const [freight, setFreight] = useState(0);

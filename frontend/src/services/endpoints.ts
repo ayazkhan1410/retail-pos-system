@@ -1,4 +1,5 @@
 import api from './api';
+import type { PaginatedSuppliersResponse, SupplierApi, SupplierListParams } from './suppliers';
 
 export interface HealthCheckResponse {
   status: string;
@@ -60,11 +61,15 @@ export const purchasesApi = {
 };
 
 export const suppliersApi = {
-  getAll: (params?: Record<string, string>) => api.get('/suppliers', { params }),
-  getById: (id: string) => api.get(`/suppliers/${id}`),
-  create: (data: unknown) => api.post('/suppliers', data),
-  update: (id: string, data: unknown) => api.patch(`/suppliers/${id}`, data),
-  delete: (id: string) => api.delete(`/suppliers/${id}`),
+  getAll: (params?: SupplierListParams) =>
+    api.get<PaginatedSuppliersResponse>('/suppliers/', { params }),
+  getById: (id: string | number) => api.get<SupplierApi>(`/suppliers/${id}/`),
+  create: (data: Record<string, unknown>) => api.post<SupplierApi>('/suppliers/', data),
+  update: (id: string | number, data: Record<string, unknown>) =>
+    api.patch<SupplierApi>(`/suppliers/${id}/`, data),
+  delete: (id: string | number) => api.delete(`/suppliers/${id}/`),
+  bulkDelete: (ids: number[]) =>
+    api.post<{ message: string }>('/suppliers/bulk-delete/', { ids }),
 };
 
 export const inventoryApi = {

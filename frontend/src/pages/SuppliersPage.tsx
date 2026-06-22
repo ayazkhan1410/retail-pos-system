@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Plus,
@@ -6,35 +6,129 @@ import {
   Pencil,
   Trash2,
   Building2,
-  Phone,
-  Mail,
-  MapPin,
-  Eye,
 } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
 import { Card, Button, Input, Badge, Modal } from '@/components/ui';
 import SupplierForm from '@/components/suppliers/SupplierForm';
-import { useSupplierStore } from '@/store';
+import { suppliersApi } from '@/services/endpoints';
+import { mapSupplierFromApi, mapSupplierToApi } from '@/services/suppliers';
 import { formatCurrency } from '@/utils';
 import type { Supplier } from '@/types';
+import type { SupplierFormData } from '@/store';
+
+const PAGE_SIZE = 20;
 
 export default function SuppliersPage() {
-  const { suppliers, addSupplier, updateSupplier, deleteSupplier } = useSupplierStore();
+  const mainRef = useRef<HTMLElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [activeCount, setActiveCount] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [viewingSupplier, setViewingSupplier] = useState<Supplier | null>(null);
 
-  const filtered = suppliers.filter(
-    (s) =>
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.contactPerson.toLowerCase().includes(search.toLowerCase()) ||
-      s.city.toLowerCase().includes(search.toLowerCase()) ||
-      s.phone.includes(search),
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const loadActiveCount = useCallback(async (searchTerm: string) => {
+    try {
+      const activeRes = await suppliersApi.getAll({
+        page: 1,
+        page_size: 1,
+        status: 'active',
+        search: searchTerm || undefined,
+      });
+      setActiveCount(activeRes.data.count);
+    } catch {
+      setActiveCount(0);
+    }
+  }, []);
+
+  const loadPage = useCallback(
+    async (pageNum: number, append: boolean) => {
+      if (append) setLoadingMore(true);
+      else setInitialLoading(true);
+      setError(null);
+
+      try {
+        const listRes = await suppliersApi.getAll({
+          page: pageNum,
+          page_size: PAGE_SIZE,
+          search: debouncedSearch || undefined,
+          ordering: '-created_at',
+        });
+
+        const mapped = listRes.data.results.map(mapSupplierFromApi);
+        setSuppliers((prev) => (append ? [...prev, ...mapped] : mapped));
+        setTotalCount(listRes.data.count);
+        setHasMore(pageNum * PAGE_SIZE < listRes.data.count);
+
+        if (!append) {
+          await loadActiveCount(debouncedSearch);
+        }
+      } catch {
+        setError('Failed to load suppliers. Please try again.');
+        if (!append) {
+          setSuppliers([]);
+          setTotalCount(0);
+          setActiveCount(0);
+        }
+        setHasMore(false);
+      } finally {
+        setInitialLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [debouncedSearch, loadActiveCount],
   );
 
-  const activeCount = suppliers.filter((s) => s.status === 'active').length;
+  useEffect(() => {
+    setPage(1);
+    void loadPage(1, false);
+  }, [debouncedSearch, loadPage]);
+
+  useEffect(() => {
+    if (page === 1) return;
+    void loadPage(page, true);
+  }, [page, loadPage]);
+
+  useEffect(() => {
+    const root = mainRef.current;
+    const sentinel = sentinelRef.current;
+    if (!root || !sentinel || !hasMore || initialLoading || loadingMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          setPage((current) => current + 1);
+        }
+      },
+      { root, rootMargin: '160px', threshold: 0 },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, initialLoading, loadingMore, suppliers.length]);
+
+  const reloadFromStart = () => {
+    setSuppliers([]);
+    setHasMore(true);
+    setPage(1);
+    void loadPage(1, false);
+  };
 
   const openAdd = () => {
     setEditingSupplier(null);
@@ -51,21 +145,42 @@ export default function SuppliersPage() {
     setViewModalOpen(true);
   };
 
-  const handleSubmit = (data: Parameters<typeof addSupplier>[0]) => {
-    if (editingSupplier) {
-      updateSupplier(editingSupplier.id, data);
-    } else {
-      addSupplier(data);
+  const handleSubmit = async (data: SupplierFormData) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const payload = mapSupplierToApi(data);
+      if (editingSupplier) {
+        await suppliersApi.update(editingSupplier.id, payload);
+      } else {
+        await suppliersApi.create(payload);
+      }
+      setModalOpen(false);
+      setEditingSupplier(null);
+      reloadFromStart();
+    } catch {
+      setError(editingSupplier ? 'Failed to update supplier.' : 'Failed to create supplier.');
+    } finally {
+      setSaving(false);
     }
-    setModalOpen(false);
-    setEditingSupplier(null);
+  };
+
+  const handleDelete = async (supplier: Supplier) => {
+    if (!window.confirm(`Delete supplier "${supplier.name}"?`)) return;
+    setError(null);
+    try {
+      await suppliersApi.delete(supplier.id);
+      reloadFromStart();
+    } catch {
+      setError('Failed to delete supplier.');
+    }
   };
 
   return (
     <>
       <Header
         title="Suppliers"
-        subtitle={`${suppliers.length} suppliers · ${activeCount} active`}
+        subtitle={`${totalCount} suppliers · ${activeCount} active`}
         actions={
           <Button variant="accent" size="sm" onClick={openAdd}>
             <Plus className="h-4 w-4" /> Add Supplier
@@ -73,34 +188,38 @@ export default function SuppliersPage() {
         }
       />
 
-      <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6">
-        <div className="mb-6 grid gap-4 sm:grid-cols-3">
-          <Card hover className="flex items-center gap-4" padding="sm">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10">
-              <Building2 className="h-5 w-5 text-accent" />
+      <main ref={mainRef} className="page-bg flex-1 overflow-y-auto p-4 sm:p-6">
+        {error && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+            {error}
+          </div>
+        )}
+
+        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+          <Card hover className="flex items-center gap-3" padding="sm">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10">
+              <Building2 className="h-4 w-4 text-accent" />
             </div>
             <div>
-              <p className="text-sm text-brand-500">Total Suppliers</p>
-              <p className="font-display text-2xl font-bold">{suppliers.length}</p>
+              <p className="text-xs text-brand-500">Total Suppliers</p>
+              <p className="font-display text-xl font-bold">{totalCount}</p>
             </div>
           </Card>
           <Card hover padding="sm">
-            <p className="text-sm text-brand-500">Active Suppliers</p>
-            <p className="font-display text-2xl font-bold text-emerald-600">{activeCount}</p>
+            <p className="text-xs text-brand-500">Active Suppliers</p>
+            <p className="font-display text-xl font-bold text-emerald-600">{activeCount}</p>
           </Card>
           <Card hover padding="sm">
-            <p className="text-sm text-brand-500">Total Purchases</p>
-            <p className="font-display text-2xl font-bold">
-              {formatCurrency(suppliers.reduce((sum, s) => sum + s.totalPurchases, 0))}
-            </p>
+            <p className="text-xs text-brand-500">Total Purchases</p>
+            <p className="font-display text-xl font-bold">{formatCurrency(0)}</p>
           </Card>
         </div>
 
         <Card padding="none" hover>
-          <div className="border-b border-brand-100 p-4 dark:border-brand-800">
-            <div className="max-w-md">
+          <div className="border-b border-brand-100 p-3 dark:border-brand-800">
+            <div className="max-w-sm">
               <Input
-                placeholder="Search by name, contact, city, phone..."
+                placeholder="Search by name, city, phone..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 icon={<Search className="h-4 w-4" />}
@@ -108,84 +227,73 @@ export default function SuppliersPage() {
             </div>
           </div>
 
-          <div className="grid gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
-            {filtered.map((supplier) => (
-              <div
-                key={supplier.id}
-                className="group rounded-2xl border border-brand-100 bg-brand-50/30 p-5 transition-all hover:border-accent/30 hover:shadow-card dark:border-brand-800 dark:bg-brand-800/20"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-accent/20 to-accent/5">
-                    <Building2 className="h-6 w-6 text-accent" />
+          {initialLoading ? (
+            <div className="py-10 text-center text-sm text-brand-500">Loading suppliers…</div>
+          ) : suppliers.length === 0 ? (
+            <div className="py-10 text-center">
+              <Building2 className="mx-auto h-10 w-10 text-brand-300" />
+              <p className="mt-2 text-sm font-medium">No suppliers found</p>
+              <Button variant="accent" size="sm" className="mt-3" onClick={openAdd}>
+                <Plus className="h-4 w-4" /> Add First Supplier
+              </Button>
+            </div>
+          ) : (
+            <div className="divide-y divide-brand-100 dark:divide-brand-800">
+              {suppliers.map((supplier) => (
+                <div
+                  key={supplier.id}
+                  className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-brand-50/60 dark:hover:bg-brand-800/30"
+                >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/10">
+                    <Building2 className="h-4 w-4 text-accent" />
                   </div>
-                  <Badge variant={supplier.status === 'active' ? 'success' : 'default'}>
-                    {supplier.status}
-                  </Badge>
-                </div>
 
-                <h3 className="mt-4 font-display text-lg font-bold">{supplier.name}</h3>
-                <p className="text-sm text-brand-500">{supplier.contactPerson}</p>
-
-                <div className="mt-4 space-y-2 text-sm text-brand-600 dark:text-brand-400">
-                  <div className="flex items-center gap-2">
-                    <Phone className="h-3.5 w-3.5 shrink-0" />
-                    <span>{supplier.phone}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Mail className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{supplier.email || '—'}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{supplier.city}</span>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex items-center justify-between border-t border-brand-100 pt-4 dark:border-brand-800">
-                  <div className="space-y-2">
-                    <div>
-                      <p className="text-xs text-brand-500">Payment Type</p>
-                      <Badge variant={supplier.paymentType === 'credit' ? 'warning' : 'default'}>
-                        {supplier.paymentType === 'credit' ? 'Credit' : 'Cash'}
+                  <div
+                    className="min-w-0 flex-1 cursor-pointer"
+                    onClick={() => openView(supplier)}
+                    onKeyDown={(e) => e.key === 'Enter' && openView(supplier)}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="truncate text-sm font-semibold hover:text-accent">
+                        {supplier.name}
+                      </h3>
+                      <Badge variant={supplier.status === 'active' ? 'success' : 'default'}>
+                        {supplier.status}
                       </Badge>
                     </div>
-                    <div>
-                      <p className="text-xs text-brand-500">Current Balance</p>
-                      <p className="font-semibold text-accent">{formatCurrency(supplier.currentBalance)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-brand-500">Total Purchases</p>
-                      <p className="font-semibold">{formatCurrency(supplier.totalPurchases)}</p>
-                    </div>
                   </div>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => openView(supplier)}>
-                      <Eye className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(supplier)}>
+
+                  <div className="flex shrink-0 gap-0.5">
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openEdit(supplier)}>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => deleteSupplier(supplier.id)}
-                      className="text-red-500 hover:text-red-600"
+                      className="h-8 w-8 p-0 text-red-500 hover:text-red-600"
+                      onClick={() => void handleDelete(supplier)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
-          {filtered.length === 0 && (
-            <div className="py-16 text-center">
-              <Building2 className="mx-auto h-12 w-12 text-brand-300" />
-              <p className="mt-3 font-medium">No suppliers found</p>
-              <Button variant="accent" size="sm" className="mt-4" onClick={openAdd}>
-                <Plus className="h-4 w-4" /> Add First Supplier
-              </Button>
+          <div ref={sentinelRef} className="h-1" />
+
+          {loadingMore && (
+            <div className="border-t border-brand-100 py-3 text-center text-xs text-brand-500 dark:border-brand-800">
+              Loading more…
+            </div>
+          )}
+
+          {!initialLoading && suppliers.length > 0 && !hasMore && (
+            <div className="border-t border-brand-100 py-2 text-center text-xs text-brand-400 dark:border-brand-800">
+              All {totalCount} suppliers loaded
             </div>
           )}
         </Card>
@@ -193,14 +301,16 @@ export default function SuppliersPage() {
 
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => !saving && setModalOpen(false)}
         title={editingSupplier ? 'Edit Supplier' : 'Add New Supplier'}
         size="lg"
         footer={
           <>
-            <Button variant="outline" onClick={() => setModalOpen(false)}>Cancel</Button>
-            <Button variant="accent" type="submit" form="supplier-form">
-              {editingSupplier ? 'Save Changes' : 'Add Supplier'}
+            <Button variant="outline" onClick={() => setModalOpen(false)} disabled={saving}>
+              Cancel
+            </Button>
+            <Button variant="accent" type="submit" form="supplier-form" disabled={saving}>
+              {saving ? 'Saving…' : editingSupplier ? 'Save Changes' : 'Add Supplier'}
             </Button>
           </>
         }
@@ -226,16 +336,14 @@ export default function SuppliersPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             {[
               { label: 'Company Name', value: viewingSupplier.name },
-              { label: 'Contact Person', value: viewingSupplier.contactPerson },
-              { label: 'Phone', value: viewingSupplier.phone },
+              { label: 'Phone', value: viewingSupplier.phone || '—' },
               { label: 'Email', value: viewingSupplier.email || '—' },
-              { label: 'City', value: viewingSupplier.city },
+              { label: 'City', value: viewingSupplier.city || '—' },
               { label: 'NTN / STRN', value: viewingSupplier.ntn || '—' },
-              { label: 'Address', value: viewingSupplier.address, full: true },
+              { label: 'Address', value: viewingSupplier.address || '—', full: true },
               { label: 'Bank Account', value: viewingSupplier.bankAccount || '—', full: true },
               { label: 'Payment Type', value: viewingSupplier.paymentType === 'credit' ? 'Credit' : 'Cash' },
               { label: 'Current Balance', value: formatCurrency(viewingSupplier.currentBalance) },
-              { label: 'Total Purchases', value: formatCurrency(viewingSupplier.totalPurchases) },
               { label: 'Status', value: viewingSupplier.status },
             ].map((item) => (
               <div key={item.label} className={item.full ? 'sm:col-span-2' : ''}>

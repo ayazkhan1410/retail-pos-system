@@ -8,7 +8,12 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/auth/', include('auth.urls')),
     path('api/inventory/', include('inventory.urls')),
+    path('api/suppliers/', include('suppliers.urls')),
+
+    # Health Check Endpoints
     path('api/health-check/', HealthCheckView.as_view()),
+
+    # System Endpoints
     path('api/system/version/', AppVersionView.as_view()),
     path('api/system/check-updates/', CheckUpdatesView.as_view()),
     path('api/system/backup/', DatabaseBackupView.as_view()),

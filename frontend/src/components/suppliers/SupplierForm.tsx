@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Input, Select } from '@/components/ui';
+import { PAKISTAN_CITIES } from '@/constants/pakistanCities';
 import type { Supplier } from '@/types';
 import type { SupplierFormData } from '@/store';
 
 const emptyForm: SupplierFormData = {
   name: '',
-  contactPerson: '',
   phone: '',
   email: '',
   address: '',
@@ -26,11 +26,21 @@ interface SupplierFormProps {
 export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) {
   const [form, setForm] = useState<SupplierFormData>(emptyForm);
 
+  const cityOptions = useMemo(() => {
+    const citySet = new Set<string>(PAKISTAN_CITIES);
+    if (form.city) citySet.add(form.city);
+    return [
+      { value: '', label: 'Select city' },
+      ...[...citySet]
+        .sort((a, b) => a.localeCompare(b))
+        .map((city) => ({ value: city, label: city })),
+    ];
+  }, [form.city]);
+
   useEffect(() => {
     if (supplier) {
       setForm({
         name: supplier.name,
-        contactPerson: supplier.contactPerson,
         phone: supplier.phone,
         email: supplier.email,
         address: supplier.address,
@@ -61,7 +71,9 @@ export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) 
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit(form);
+    const trimmedName = form.name.trim();
+    if (!trimmedName) return;
+    onSubmit({ ...form, name: trimmedName });
   };
 
   return (
@@ -75,18 +87,10 @@ export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) 
         className="sm:col-span-2"
       />
       <Input
-        label="Contact Person *"
-        value={form.contactPerson}
-        onChange={(e) => handleChange('contactPerson', e.target.value)}
-        placeholder="e.g. Ahmed Khan"
-        required
-      />
-      <Input
-        label="Phone Number *"
+        label="Phone Number"
         value={form.phone}
         onChange={(e) => handleChange('phone', e.target.value)}
         placeholder="+92 300 1234567"
-        required
       />
       <Input
         label="Email"
@@ -95,12 +99,11 @@ export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) 
         onChange={(e) => handleChange('email', e.target.value)}
         placeholder="orders@supplier.pk"
       />
-      <Input
-        label="City *"
+      <Select
+        label="City"
         value={form.city}
         onChange={(e) => handleChange('city', e.target.value)}
-        placeholder="Lahore"
-        required
+        options={cityOptions}
       />
       <Input
         label="NTN / STRN"
@@ -109,11 +112,10 @@ export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) 
         placeholder="1234567-8"
       />
       <Input
-        label="Address *"
+        label="Address"
         value={form.address}
         onChange={(e) => handleChange('address', e.target.value)}
         placeholder="Street, area, landmark"
-        required
         className="sm:col-span-2"
       />
       <Input

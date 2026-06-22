@@ -90,7 +90,7 @@ function waitForHealth(maxAttempts = 60, onProgress) {
 
 async function startStack() {
   setSplashProgress(8, 'Starting Docker services…');
-  await execAsync('docker compose up -d --build');
+  await execAsync('docker compose up -d');
   setSplashProgress(35, 'Services are starting…');
   await waitForHealth(60, setSplashProgress);
 }

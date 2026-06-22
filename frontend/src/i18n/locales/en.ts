@@ -262,6 +262,7 @@ export const en = {
     updateShowDetails: 'View update',
     updateInstallingTitle: 'Installing update…',
     updateInstallingBody: 'Please wait while SmartShop downloads and applies the latest version. Do not close the app.',
+    updateProgressStart: 'Preparing update…',
     updateLater: 'Not Now',
     updateNow: 'Update Now',
     updateDesktopOnly: 'Open the SmartShop desktop app to install updates automatically.',

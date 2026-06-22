@@ -140,7 +140,7 @@ export type ProductFormData = Omit<Product, 'id' | 'status'>;
 
 interface InventoryState {
   products: Product[];
-  addProduct: (data: ProductFormData) => void;
+  addProduct: (data: ProductFormData) => Product;
   updateProduct: (id: string, data: ProductFormData) => void;
   deleteProduct: (id: string) => void;
 }
@@ -161,7 +161,9 @@ export const useInventoryStore = create<InventoryState>()(
     (set, get) => ({
       products: MOCK_PRODUCTS,
       addProduct: (data) => {
-        set({ products: [...get().products, toProduct(data)] });
+        const newProduct = toProduct(data);
+        set({ products: [...get().products, newProduct] });
+        return newProduct;
       },
       updateProduct: (id, data) => {
         const existing = get().products.find((p) => p.id === id);

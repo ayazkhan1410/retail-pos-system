@@ -7,11 +7,13 @@ from inventory.views import (
     ImportProductsView,
     ProductDetailView,
     ProductListCreateView,
+    ProductSearchView,
     WriteOffExpiredView,
 )
 
 urlpatterns = [
     path('products/', ProductListCreateView.as_view()),
+    path('products/search/', ProductSearchView.as_view()),
     path('products/<int:pk>/', ProductDetailView.as_view()),
     path('products/import/', ImportProductsView.as_view()),
     path('products/<int:pk>/adjust/', AdjustStockView.as_view()),

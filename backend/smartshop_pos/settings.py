@@ -131,6 +131,9 @@ AUTH_USER_MODEL = 'custom_auth.CustomUser'
 
 BACKUP_DIR = os.getenv('BACKUP_DIR', str(BASE_DIR / 'backups'))
 
+# Product search (bulk catalogue). Empty disables indexing/search endpoints fail closed.
+ELASTICSEARCH_URL = os.getenv('ELASTICSEARCH_URL', '').rstrip('/')
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.SessionAuthentication',

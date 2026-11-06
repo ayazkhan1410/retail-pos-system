@@ -27,13 +27,13 @@ def _qty_label(quantity):
 
 
 def _sale_items_summary(rows, limit=2):
-    """Short readable line for Recent Activity, e.g. 'Milk ×2, Bread +1 more'."""
+    """Short readable line for Recent Activity, e.g. 'Milk x2, Bread +1 more'."""
     parts = []
     for product, quantity, *_ in rows[:limit]:
         if quantity == 1:
             parts.append(product.name)
         else:
-            parts.append(f'{product.name} ×{_qty_label(quantity)}')
+            parts.append(f'{product.name} x{_qty_label(quantity)}')
     extra = len(rows) - limit
     if extra > 0:
         parts.append(f'+{extra} more')
@@ -234,6 +234,47 @@ def close_shift(user, shift_id, counted_cash):
         'difference': str(counted_cash - shift.expected_cash),
     })
     return shift
+
+
+def build_z_report(shift):
+    """End-of-day style summary for print/share from an already-closed (or open) shift."""
+    sales = list(shift.sales.select_related('cashier').prefetch_related('payments', 'lines'))
+    returns = list(shift.returns.all())
+    payments = {}
+    for sale in sales:
+        for payment in sale.payments.all():
+            payments[payment.method] = payments.get(payment.method, Decimal(0)) + payment.amount
+    sales_total = sum((sale.total for sale in sales), Decimal(0))
+    returns_total = sum((row.total for row in returns), Decimal(0))
+    expected = shift.expected_cash if shift.expected_cash is not None else expected_cash(shift)
+    counted = shift.counted_cash
+    difference = None if counted is None else counted - expected
+    return {
+        'shift_id': shift.pk,
+        'terminal': shift.terminal.name,
+        'opened_at': shift.opened_at,
+        'closed_at': shift.closed_at,
+        'opened_by': shift.opened_by.full_name,
+        'opening_cash': str(shift.opening_cash),
+        'expected_cash': str(expected),
+        'counted_cash': None if counted is None else str(counted),
+        'difference': None if difference is None else str(difference),
+        'sales_count': len(sales),
+        'sales_total': str(sales_total),
+        'returns_count': len(returns),
+        'returns_total': str(returns_total),
+        'net_sales': str(sales_total - returns_total),
+        'payments': {method: str(amount) for method, amount in sorted(payments.items())},
+        'invoices': [
+            {
+                'invoice_no': sale.invoice_no,
+                'total': str(sale.total),
+                'cashier': sale.cashier.full_name,
+                'created_at': sale.created_at,
+            }
+            for sale in sales
+        ],
+    }
 
 
 @transaction.atomic

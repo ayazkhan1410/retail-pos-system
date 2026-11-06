@@ -4,7 +4,10 @@ from rest_framework import serializers
 
 from customers.models import Customer
 from inventory.models import Product
-from sales.models import Payment, Sale, SaleLine, SaleReturn, Shift, Terminal
+from sales.models import HeldBill, Payment, Sale, SaleLine, SaleReturn, Shift, Terminal
+
+HELD_LINE_LIMIT = 200
+HELD_BILL_LIMIT = 40
 
 
 class TerminalSerializer(serializers.ModelSerializer):
@@ -129,3 +132,53 @@ class ReturnSerializer(serializers.ModelSerializer):
     class Meta:
         model = SaleReturn
         fields = ('id', 'number', 'sale', 'method', 'reason', 'total', 'tax', 'created_at')
+
+
+class HeldLineInputSerializer(serializers.Serializer):
+    product_id = serializers.IntegerField(min_value=1)
+    quantity = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=Decimal('0.001'))
+    name = serializers.CharField(max_length=255)
+    barcode = serializers.CharField(max_length=64, allow_blank=True, required=False, default='')
+    unit_price = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal(0))
+
+
+class HeldBillInputSerializer(serializers.Serializer):
+    terminal = serializers.PrimaryKeyRelatedField(queryset=Terminal.objects.filter(active=True))
+    label = serializers.CharField(max_length=80, required=False, allow_blank=True, default='')
+    customer = serializers.PrimaryKeyRelatedField(
+        queryset=Customer.objects.filter(active=True), required=False, allow_null=True,
+    )
+    discount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal(0), default=Decimal(0))
+    lines = HeldLineInputSerializer(many=True, allow_empty=False)
+
+    def validate_lines(self, lines):
+        if len(lines) > HELD_LINE_LIMIT:
+            raise serializers.ValidationError(f'At most {HELD_LINE_LIMIT} lines on a held bill.')
+        product_ids = [line['product_id'] for line in lines]
+        if len(set(product_ids)) != len(product_ids):
+            raise serializers.ValidationError('Duplicate products on a held bill.')
+        existing = set(Product.objects.filter(pk__in=product_ids).values_list('pk', flat=True))
+        missing = [pk for pk in product_ids if pk not in existing]
+        if missing:
+            raise serializers.ValidationError(f'Unknown product id: {missing[0]}')
+        return lines
+
+
+class HeldBillSerializer(serializers.ModelSerializer):
+    held_by_name = serializers.CharField(source='held_by.full_name', read_only=True)
+    terminal_name = serializers.CharField(source='terminal.name', read_only=True)
+    customer_name = serializers.CharField(source='customer.name', read_only=True, default='')
+    item_count = serializers.IntegerField(read_only=True)
+    subtotal = serializers.SerializerMethodField()
+
+    class Meta:
+        model = HeldBill
+        fields = (
+            'id', 'terminal', 'terminal_name', 'held_by', 'held_by_name', 'label',
+            'customer', 'customer_name', 'discount', 'lines', 'item_count', 'subtotal',
+            'created_at', 'updated_at',
+        )
+        read_only_fields = ('held_by',)
+
+    def get_subtotal(self, bill):
+        return str(bill.subtotal)

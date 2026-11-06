@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 from audit.models import log_event
 from auth.permissions import requires
 from inventory.models import Category, Product, StockLevel, default_branch
+from inventory.search import products_for_ids, search_product_ids
 from inventory.serializers import AdjustStockInput, BranchSerializer, ProductSerializer
 from inventory.services import set_stock, write_off_expired
 
@@ -38,6 +39,26 @@ class ProductListCreateView(generics.ListCreateAPIView):
         if self.request.query_params.get('include_inactive') != '1':
             queryset = queryset.filter(active=True)
         return queryset
+
+
+class ProductSearchView(APIView):
+    """Fast catalogue search via Elasticsearch (name, barcode, brand)."""
+
+    permission_classes = [requires(write='products.edit')]
+
+    def get(self, request):
+        query = (request.query_params.get('q') or '').strip()
+        if len(query) < 1:
+            return Response({'results': [], 'count': 0})
+        include_inactive = request.query_params.get('include_inactive') == '1'
+        try:
+            limit = int(request.query_params.get('limit') or 40)
+        except (TypeError, ValueError):
+            limit = 40
+        ids = search_product_ids(query, include_inactive=include_inactive, limit=limit)
+        products = products_for_ids(ids)
+        data = ProductSerializer(products, many=True, context={'request': request}).data
+        return Response({'results': data, 'count': len(data)})
 
 
 class ProductDetailView(generics.RetrieveUpdateDestroyAPIView):

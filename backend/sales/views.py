@@ -13,8 +13,11 @@ from audit.models import AuditLog
 from auth.permissions import requires
 from customers.models import Customer
 from inventory.models import Product, StockLevel, default_branch
-from sales.models import Payment, Sale, SaleLine, SaleReturn, Shift, Terminal
+from sales.models import HeldBill, Payment, Sale, SaleLine, SaleReturn, Shift, Terminal
 from sales.serializers import (
+    HELD_BILL_LIMIT,
+    HeldBillInputSerializer,
+    HeldBillSerializer,
     ReturnInputSerializer,
     ReturnSerializer,
     SaleInputSerializer,
@@ -22,7 +25,7 @@ from sales.serializers import (
     ShiftSerializer,
     TerminalSerializer,
 )
-from sales.services import close_shift, create_return, create_sale, open_shift
+from sales.services import build_z_report, close_shift, create_return, create_sale, open_shift
 
 
 class SalePagination(PageNumberPagination):
@@ -136,6 +139,67 @@ class CloseShiftView(APIView):
         data.is_valid(raise_exception=True)
         shift = close_shift(request.user, pk, data.validated_data['counted_cash'])
         return Response(ShiftSerializer(shift).data)
+
+
+class ShiftZReportView(APIView):
+    permission_classes = [requires(read='pos.sell')]
+
+    def get(self, request, pk):
+        shift = generics.get_object_or_404(
+            Shift.objects.select_related('terminal', 'opened_by'),
+            pk=pk,
+        )
+        return Response(build_z_report(shift))
+
+
+class HeldBillListCreateView(APIView):
+    permission_classes = [requires(write='pos.sell')]
+
+    def get(self, request):
+        terminal_id = request.query_params.get('terminal')
+        queryset = HeldBill.objects.select_related('terminal', 'held_by', 'customer')
+        if terminal_id:
+            queryset = queryset.filter(terminal_id=terminal_id)
+        return Response(HeldBillSerializer(queryset[:HELD_BILL_LIMIT], many=True).data)
+
+    def post(self, request):
+        data = HeldBillInputSerializer(data=request.data)
+        data.is_valid(raise_exception=True)
+        payload = data.validated_data
+        terminal = payload['terminal']
+        open_count = HeldBill.objects.filter(terminal=terminal).count()
+        if open_count >= HELD_BILL_LIMIT:
+            return Response(
+                {'detail': f'At most {HELD_BILL_LIMIT} held bills per counter.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        bill = HeldBill.objects.create(
+            terminal=terminal,
+            held_by=request.user,
+            label=payload.get('label') or '',
+            customer=payload.get('customer'),
+            discount=payload.get('discount') or 0,
+            lines=[
+                {
+                    'product_id': line['product_id'],
+                    'quantity': str(line['quantity']),
+                    'name': line['name'],
+                    'barcode': line.get('barcode') or '',
+                    'unit_price': str(line['unit_price']),
+                }
+                for line in payload['lines']
+            ],
+        )
+        return Response(HeldBillSerializer(bill).data, status=status.HTTP_201_CREATED)
+
+
+class HeldBillDetailView(APIView):
+    permission_classes = [requires(write='pos.sell')]
+
+    def delete(self, request, pk):
+        bill = generics.get_object_or_404(HeldBill, pk=pk)
+        bill.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class DashboardView(APIView):

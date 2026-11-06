@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
@@ -121,3 +123,34 @@ class ReturnLine(AppendOnlyModel):
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     tax_amount = models.DecimalField(max_digits=14, decimal_places=2)
     restocked = models.BooleanField(default=True)
+
+
+class HeldBill(models.Model):
+    """Parked till cart — survives refresh/PIN switch; does not reserve stock."""
+
+    terminal = models.ForeignKey(Terminal, on_delete=models.CASCADE, related_name='held_bills')
+    held_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    label = models.CharField(max_length=80, blank=True)
+    customer = models.ForeignKey(
+        'customers.Customer', null=True, blank=True, on_delete=models.SET_NULL, related_name='+',
+    )
+    discount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    # [{product_id, quantity, name, barcode, unit_price}]
+    lines = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-id']
+        indexes = [models.Index(fields=['terminal', '-id'])]
+
+    @property
+    def item_count(self):
+        return len(self.lines or [])
+
+    @property
+    def subtotal(self):
+        total = Decimal(0)
+        for line in self.lines or []:
+            total += Decimal(str(line.get('unit_price', 0))) * Decimal(str(line.get('quantity', 0)))
+        return total - self.discount

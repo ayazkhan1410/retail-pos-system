@@ -88,6 +88,7 @@ interface POSState {
   updateQuantity: (productId: string, quantity: number) => void;
   removeFromCart: (productId: string) => void;
   clearCart: () => void;
+  replaceCart: (cart: CartItem[]) => void;
   syncCart: (products: Product[]) => void;
   pendingSales: NewSale[];
   queueSale: (sale: NewSale) => void;
@@ -145,6 +146,7 @@ export const usePOSStore = create<POSState>()(
       removeFromCart: (productId) =>
         set({ cart: get().cart.filter((c) => c.product.id !== productId) }),
       clearCart: () => set({ cart: [], scannerInput: '' }),
+      replaceCart: (cart) => set({ cart, scannerInput: '' }),
       // A saved bill can outlive a price change, and the server always charges the current price.
       syncCart: (products) => {
         const byId = new Map(products.map((p) => [p.id, p]));

@@ -1,0 +1,23 @@
+---
+description: SmartShop POS handoff — branch state, constraints, and what is left for delivery
+alwaysApply: true
+---
+
+# SmartShop POS — agent handoff
+
+Before large changes, read `docs/CURSOR-CONTEXT.md` and (for QA status) `docs/TESTING-AND-SECURITY-REPORT.md`.
+
+## Hard constraints
+- Single-shop barcode POS (Rs). Do not invent JazzCash/Easypaisa/FBR/Raast payment rails.
+- Do not create, edit, commit, or run migrations unless the user explicitly asks. After approved model edits, only report the migrate commands.
+- Prefer the smallest complete change; no unrelated refactors.
+- Branch in use: `Ayaz/local-main`. Handoff dump: `backups/smartshop-20261106-202620.sql` (restore via `infra/scripts/restore.sh`).
+
+## Already shipped on this branch
+Product-list `extra_barcodes` fix; notification dedupe + SSE cap; purchase returns API/UI; walk-in returns (server-priced); PIN set/switch with anti-escalation; product form sale rate + extra barcodes; GRN void / security tests; testing report.
+
+## Do not claim as done
+Real Raast, multi-branch/cloud sync, licensing, invoice OCR, NLP Q&A, forecasting, Windows installer verified on Windows, shop-LAN HTTPS.
+
+## Next useful work (only if asked)
+Prod secrets + HTTPS + backup drill; hardware till; purchase-return typeahead; pagination for huge catalogs — not greenfield AI/payment features unless scoped.

@@ -40,9 +40,9 @@ export default function RolesCard() {
       {error && <p role="alert" className="mb-3 text-sm text-red-600">{error}</p>}
       {matrix && (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="data-table">
             <thead>
-              <tr className="border-b border-brand-100 text-left text-xs text-brand-500 dark:border-brand-800">
+              <tr>
                 <th className="py-2 pr-3 font-medium">{t('settings.permission')}</th>
                 {roles.map((role) => (
                   <th key={role} className="px-2 py-2 text-center font-medium">{t(ROLE_LABEL_KEYS[role])}</th>

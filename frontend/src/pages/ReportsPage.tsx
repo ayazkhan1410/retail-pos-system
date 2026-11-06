@@ -47,7 +47,7 @@ export default function ReportsPage() {
   return (
     <>
       <Header title={t('reports.title')} subtitle={t('reports.subtitle')} actions={<Button variant="outline" size="sm" onClick={() => window.print()}>{t('reports.print')}</Button>} />
-      <main className="page-bg flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
+      <main className="page-bg flex-1 space-y-4 overflow-y-auto p-4 sm:p-6 lg:p-8">
         <Card hover padding="sm">
           <div className="grid gap-3 sm:grid-cols-2 lg:max-w-xl">
             <Input id="report-from" label={t('sales.from')} type="date" value={from} onChange={(e) => setFrom(e.target.value)} />

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, CalendarClock, PackageX, ShoppingBasket, UserCheck } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Badge, Card, CardHeader, CardTitle } from '@/components/ui';
+import { Badge, Card, CardHeader, CardTitle, ErrorState, SkeletonRows } from '@/components/ui';
 import { financeApi } from '@/services/endpoints';
 import { useTranslation } from '@/i18n';
 import { formatCurrency } from '@/utils';
@@ -25,9 +25,9 @@ export default function InsightsPage() {
   return (
     <>
       <Header title={t('insights.title')} subtitle={t('insights.subtitle')} />
-      <main className="page-bg flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
-        {failed && <p role="alert" className="text-sm text-red-600">{t('insights.loadError')}</p>}
-        {!data && !failed && <p className="text-sm text-brand-500">{t('common.loading')}</p>}
+      <main className="page-bg flex-1 space-y-4 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        {failed && <Card padding="none"><ErrorState message={t('insights.loadError')} /></Card>}
+        {!data && !failed && <Card padding="none"><SkeletonRows rows={6} columns={6} label={t('common.loading')} /></Card>}
         {data && (
           <>
             <Card hover>
@@ -39,20 +39,20 @@ export default function InsightsPage() {
               </CardHeader>
               {data.reorder.length === 0 ? <Empty /> : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead><tr className="border-b border-brand-100 text-left text-xs text-brand-500 dark:border-brand-800">
-                      <th className="py-2">{t('pos.item')}</th><th>{t('inventory.supplier')}</th><th className="text-right">{t('inventory.qtyOnHand')}</th><th className="text-right">{t('insights.perDay')}</th><th className="text-right">{t('insights.daysLeft')}</th><th className="text-right">{t('insights.order')}</th><th className="text-right">{t('insights.cost')}</th>
+                  <table className="data-table min-w-[640px]">
+                    <thead><tr>
+                      <th>{t('pos.item')}</th><th>{t('inventory.supplier')}</th><th className="text-end">{t('inventory.qtyOnHand')}</th><th className="text-end">{t('insights.perDay')}</th><th className="text-end">{t('insights.daysLeft')}</th><th className="text-end">{t('insights.order')}</th><th className="text-end">{t('insights.cost')}</th>
                     </tr></thead>
                     <tbody>
                       {data.reorder.map((row) => (
-                        <tr key={row.id} className="border-b border-brand-50 dark:border-brand-800/40">
-                          <td className="py-2 font-medium">{row.name}</td>
+                        <tr key={row.id}>
+                          <td className="font-medium">{row.name}</td>
                           <td className="text-brand-500">{row.supplier || '—'}</td>
-                          <td className="text-right">{Number(row.stock)}</td>
-                          <td className="text-right">{Number(row.daily_sales)}</td>
-                          <td className="text-right">{row.days_left === null ? '—' : Number(row.days_left)}</td>
-                          <td className="text-right font-bold">{Number(row.order_quantity)}</td>
-                          <td className="text-right">{formatCurrency(Number(row.order_cost))}</td>
+                          <td className="text-end tabular-nums">{Number(row.stock)}</td>
+                          <td className="text-end tabular-nums">{Number(row.daily_sales)}</td>
+                          <td className="text-end tabular-nums">{row.days_left === null ? '—' : Number(row.days_left)}</td>
+                          <td className="text-end tabular-nums font-bold">{Number(row.order_quantity)}</td>
+                          <td className="text-end tabular-nums">{formatCurrency(Number(row.order_cost))}</td>
                         </tr>
                       ))}
                     </tbody>

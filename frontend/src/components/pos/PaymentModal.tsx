@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Banknote, BookUser, CreditCard, Landmark, Smartphone, type LucideIcon } from 'lucide-react';
 import { Modal, Button, Input, Select } from '@/components/ui';
 import { useTranslation } from '@/i18n';
-import { formatCurrency } from '@/utils';
+import { cn, formatCurrency } from '@/utils';
 import type { Customer, PaymentMethod } from '@/types';
 
-const METHODS: { method: PaymentMethod; labelKey: string }[] = [
-  { method: 'cash', labelKey: 'pos.cash' },
-  { method: 'jazzcash', labelKey: 'pos.jazzcash' },
-  { method: 'easypaisa', labelKey: 'pos.easypaisa' },
-  { method: 'raast', labelKey: 'pos.raast' },
-  { method: 'card', labelKey: 'pos.cardShort' },
-  { method: 'credit', labelKey: 'pos.onCredit' },
+const METHODS: { method: PaymentMethod; labelKey: string; icon: LucideIcon }[] = [
+  { method: 'cash', labelKey: 'pos.cash', icon: Banknote },
+  { method: 'jazzcash', labelKey: 'pos.jazzcash', icon: Smartphone },
+  { method: 'easypaisa', labelKey: 'pos.easypaisa', icon: Smartphone },
+  { method: 'raast', labelKey: 'pos.raast', icon: Landmark },
+  { method: 'card', labelKey: 'pos.cardShort', icon: CreditCard },
+  { method: 'credit', labelKey: 'pos.onCredit', icon: BookUser },
 ];
 
 export interface PaymentResult {
@@ -106,89 +107,121 @@ export default function PaymentModal({
         </>
       }
     >
-      <form id="payment-form" onSubmit={submit} className="space-y-3">
-        <div className="flex items-baseline justify-between rounded-xl bg-brand-50 p-3 dark:bg-brand-800/40">
-          <span className="text-sm text-brand-500">{t('pos.amountDue')}</span>
-          <span className="font-display text-3xl font-bold" data-testid="amount-due">{formatCurrency(due)}</span>
+      <form id="payment-form" onSubmit={submit} className="space-y-4">
+        <div className="flex items-baseline justify-between gap-3 rounded-xl bg-brand-50 px-4 py-3 dark:bg-brand-800/50">
+          <span className="text-sm font-medium text-brand-500 dark:text-brand-400">{t('pos.amountDue')}</span>
+          <span className="num text-3xl font-semibold" data-testid="amount-due">{formatCurrency(due)}</span>
         </div>
 
-        {canDiscount && (
-          <Input
-            id="bill-discount"
-            label={t('pos.billDiscount')}
-            type="number"
-            min={0}
-            step="0.01"
-            value={discount}
-            onChange={(e) => setDiscount(e.target.value)}
-            error={discountTooBig ? t('pos.discountTooBig') : undefined}
-          />
-        )}
-
-        {customers.length > 0 && (
-          <div>
-            <Select
-              id="sale-customer"
-              label={t('pos.customer')}
-              value={customerId}
-              onChange={(e) => setCustomerId(e.target.value)}
-              options={[
-                { value: '', label: t('pos.walkIn') },
-                ...customers.map((item) => ({ value: String(item.id), label: item.phone ? `${item.name} (${item.phone})` : item.name })),
-              ]}
-            />
-            {customer && (
-              <p className="mt-1 text-xs text-brand-500">
-                {t('pos.khataStatus', { balance: formatCurrency(Number(customer.balance)), limit: formatCurrency(Number(customer.credit_limit)) })}
-              </p>
+        {(canDiscount || customers.length > 0) && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {customers.length > 0 && (
+              <div className={cn(!canDiscount && 'sm:col-span-2')}>
+                <Select
+                  id="sale-customer"
+                  label={t('pos.customer')}
+                  value={customerId}
+                  onChange={(e) => setCustomerId(e.target.value)}
+                  options={[
+                    { value: '', label: t('pos.walkIn') },
+                    ...customers.map((item) => ({ value: String(item.id), label: item.phone ? `${item.name} (${item.phone})` : item.name })),
+                  ]}
+                />
+                {customer && (
+                  <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">
+                    {t('pos.khataStatus', { balance: formatCurrency(Number(customer.balance)), limit: formatCurrency(Number(customer.credit_limit)) })}
+                  </p>
+                )}
+              </div>
+            )}
+            {canDiscount && (
+              <div className={cn(customers.length === 0 && 'sm:col-span-2')}>
+                <Input
+                  id="bill-discount"
+                  label={t('pos.billDiscount')}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  inputMode="decimal"
+                  value={discount}
+                  onChange={(e) => setDiscount(e.target.value)}
+                  error={discountTooBig ? t('pos.discountTooBig') : undefined}
+                />
+              </div>
             )}
           </div>
         )}
 
-        {ordered.map(({ method, labelKey }, index) => (
-          <div key={method} className="grid grid-cols-2 gap-2">
-            <Input
-              ref={index === 0 ? firstInput : undefined}
-              id={`pay-${method}`}
-              label={t(labelKey)}
-              type="number"
-              min={0}
-              step="0.01"
-              placeholder={nothingTyped && method === initialMethod ? due.toFixed(2) : '0'}
-              value={amounts[method] ?? ''}
-              onChange={(e) => setAmounts((prev) => ({ ...prev, [method]: e.target.value }))}
-            />
-            {method !== 'cash' && method !== 'credit' && (
-              <Input
-                id={`ref-${method}`}
-                label={t('pos.reference')}
-                value={references[method] ?? ''}
-                onChange={(e) => setReferences((prev) => ({ ...prev, [method]: e.target.value }))}
-              />
-            )}
+        <fieldset>
+          <legend className="mb-2 text-sm font-medium text-brand-700 dark:text-brand-300">{t('pos.splitPayment')}</legend>
+          <div className="divide-y divide-brand-100 overflow-hidden rounded-xl border border-brand-200 dark:divide-brand-800 dark:border-brand-700">
+            {ordered.map(({ method, labelKey, icon: Icon }, index) => {
+              const value = amounts[method] ?? '';
+              const active = Number(value) > 0 || (nothingTyped && method === initialMethod);
+              const hasReference = method !== 'cash' && method !== 'credit';
+              return (
+                <div
+                  key={method}
+                  className={cn(
+                    'grid items-center gap-x-3 gap-y-2 px-3 py-2.5 transition-colors',
+                    hasReference ? 'grid-cols-[minmax(0,1fr)_8.5rem] sm:grid-cols-[minmax(0,1fr)_8.5rem_9rem]' : 'grid-cols-[minmax(0,1fr)_8.5rem]',
+                    active && 'bg-accent-soft/60',
+                  )}
+                >
+                  <label htmlFor={`pay-${method}`} className="flex min-w-0 items-center gap-2.5 text-sm font-medium">
+                    <span className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-lg', active ? 'bg-accent text-white' : 'bg-brand-100 text-brand-500 dark:bg-brand-800')}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="truncate">{t(labelKey)}</span>
+                  </label>
+                  <input
+                    ref={index === 0 ? firstInput : undefined}
+                    id={`pay-${method}`}
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    inputMode="decimal"
+                    placeholder={nothingTyped && method === initialMethod ? due.toFixed(2) : '0'}
+                    value={value}
+                    onChange={(e) => setAmounts((prev) => ({ ...prev, [method]: e.target.value }))}
+                    className="h-10 w-full rounded-lg border border-brand-200 bg-white px-3 text-end text-sm font-semibold tabular-nums placeholder:font-normal placeholder:text-brand-400 focus:border-accent focus:outline-none focus:ring-4 focus:ring-accent/15 dark:border-brand-700 dark:bg-brand-900"
+                  />
+                  {hasReference && (
+                    <input
+                      id={`ref-${method}`}
+                      aria-label={`${t(labelKey)} ${t('pos.reference')}`}
+                      placeholder={t('pos.reference')}
+                      value={references[method] ?? ''}
+                      onChange={(e) => setReferences((prev) => ({ ...prev, [method]: e.target.value }))}
+                      className="col-span-2 h-10 w-full rounded-lg border border-brand-200 bg-white px-3 text-sm placeholder:text-brand-400 focus:border-accent focus:outline-none focus:ring-4 focus:ring-accent/15 sm:col-span-1 dark:border-brand-700 dark:bg-brand-900"
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
-        ))}
+        </fieldset>
 
-        <div className="space-y-1 border-t border-brand-100 pt-3 text-sm dark:border-brand-800">
+        <dl className="space-y-1.5 rounded-xl bg-brand-50 px-4 py-3 text-sm dark:bg-brand-800/50">
           <div className="flex justify-between">
-            <span className="text-brand-500">{t('pos.paid')}</span>
-            <span className="font-semibold">{formatCurrency(paid)}</span>
+            <dt className="text-brand-500 dark:text-brand-400">{t('pos.paid')}</dt>
+            <dd className="num font-semibold">{formatCurrency(paid)}</dd>
           </div>
           {remaining > 0 && (
-            <div className="flex justify-between text-red-600">
-              <span>{t('pos.remaining')}</span>
-              <span className="font-bold">{formatCurrency(remaining)}</span>
+            <div className="flex justify-between text-red-700 dark:text-red-300">
+              <dt>{t('pos.remaining')}</dt>
+              <dd className="num font-semibold">{formatCurrency(remaining)}</dd>
             </div>
           )}
           {change > 0 && !nonCashOverpaid && (
-            <div className="flex justify-between text-lg text-emerald-600">
-              <span>{t('pos.changeDue')}</span>
-              <span className="font-bold">{formatCurrency(change)}</span>
+            <div className="flex items-baseline justify-between text-emerald-700 dark:text-emerald-300">
+              <dt className="font-medium">{t('pos.changeDue')}</dt>
+              <dd className="num text-xl font-semibold">{formatCurrency(change)}</dd>
             </div>
           )}
-          {nonCashOverpaid && <p className="text-red-600">{t('pos.overpaidNonCash')}</p>}
-          {error && <p role="alert" className="text-red-600">{error}</p>}
-        </div>
+        </dl>
+        {nonCashOverpaid && <p role="alert" className="text-sm text-red-700 dark:text-red-300">{t('pos.overpaidNonCash')}</p>}
+        {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{error}</p>}
       </form>
     </Modal>
   );

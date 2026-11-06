@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Plus, Search, Users, Pencil } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Badge, Button, Card, Input, Modal } from '@/components/ui';
+import { Badge, Button, Card, Input, Modal, EmptyState } from '@/components/ui';
 import LedgerPanel from '@/components/customers/LedgerPanel';
 import { apiErrorMessage } from '@/services';
 import { customersApi } from '@/services/endpoints';
@@ -70,7 +70,7 @@ export default function CustomersPage() {
           <Button variant="accent" size="sm" onClick={() => show(null)}><Plus className="h-4 w-4" /> {t('customers.add')}</Button>
         )}
       />
-      <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6">
+      <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
         {error && !formOpen && <p role="alert" className="mb-4 text-sm text-red-600">{error}</p>}
         <Card padding="none" hover>
           <div className="border-b border-brand-100 p-3 dark:border-brand-800">
@@ -78,12 +78,7 @@ export default function CustomersPage() {
               <Input aria-label={t('customers.search')} placeholder={t('customers.search')} value={search} onChange={(e) => setSearch(e.target.value)} icon={<Search className="h-4 w-4" />} />
             </div>
           </div>
-          {customers.length === 0 && (
-            <div className="py-12 text-center text-sm text-brand-500">
-              <Users className="mx-auto mb-2 h-10 w-10 text-brand-300" />
-              {t('customers.empty')}
-            </div>
-          )}
+          {customers.length === 0 && <EmptyState icon={Users} title={t('customers.empty')} description={search ? undefined : t('customers.emptyHint')} />}
           <div className="divide-y divide-brand-100 dark:divide-brand-800">
             {customers.map((customer) => (
               <div key={customer.id} className="flex items-center gap-3 px-4 py-3">

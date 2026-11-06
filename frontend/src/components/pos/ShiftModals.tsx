@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import { Modal, Button, Input } from '@/components/ui';
 import { apiErrorMessage } from '@/services';
 import { useTranslation } from '@/i18n';
-import { formatCurrency } from '@/utils';
+import { Lock, Unlock } from 'lucide-react';
+import { cn, formatCurrency } from '@/utils';
 import type { Shift } from '@/types';
 
 interface CashFormProps {
@@ -15,9 +16,11 @@ interface CashFormProps {
   onClose: () => void;
   onSubmit: (amount: string) => Promise<void>;
   extraFooter?: React.ReactNode;
+  icon?: 'open' | 'close';
 }
 
-function CashForm({ title, body, label, submitLabel, preventClose, onClose, onSubmit, extraFooter }: CashFormProps) {
+function CashForm({ title, body, label, submitLabel, preventClose, onClose, onSubmit, extraFooter, icon = 'open' }: CashFormProps) {
+  const Icon = icon === 'open' ? Unlock : Lock;
   const { t } = useTranslation();
   const [amount, setAmount] = useState('');
   const [saving, setSaving] = useState(false);
@@ -49,10 +52,27 @@ function CashForm({ title, body, label, submitLabel, preventClose, onClose, onSu
         </>
       }
     >
-      <form id="cash-form" onSubmit={submit} className="space-y-3">
-        <p className="text-sm text-brand-500">{body}</p>
-        <Input id="cash-amount" label={label} type="number" min={0} step="0.01" required autoFocus value={amount} onChange={(e) => setAmount(e.target.value)} />
-        {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+      <form id="cash-form" onSubmit={submit} className="space-y-4">
+        <div className="flex gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+            <Icon className="h-5 w-5" />
+          </span>
+          <p className="pt-0.5 text-sm text-brand-600 dark:text-brand-300">{body}</p>
+        </div>
+        <Input
+          id="cash-amount"
+          label={label}
+          type="number"
+          min={0}
+          step="0.01"
+          inputMode="decimal"
+          required
+          autoFocus
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          className="h-14 text-2xl font-semibold tabular-nums"
+        />
+        {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{error}</p>}
       </form>
     </Modal>
   );
@@ -76,7 +96,12 @@ export function OpenShiftModal({ counterName, canLeave, onOpen, onLogout }: {
       onSubmit={onOpen}
       extraFooter={
         canLeave ? (
-          <Link to="/dashboard"><Button variant="outline" className="w-full">{t('pos.backToDashboard')}</Button></Link>
+          <Link
+            to="/dashboard"
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-brand-200 bg-white px-4 text-sm font-semibold text-brand-800 shadow-soft hover:bg-brand-50 focus-ring dark:border-brand-700 dark:bg-brand-900 dark:text-brand-100 dark:hover:bg-brand-800"
+          >
+            {t('pos.backToDashboard')}
+          </Link>
         ) : (
           <Button variant="outline" onClick={onLogout}>{t('common.logout')}</Button>
         )
@@ -93,6 +118,7 @@ export function CloseShiftModal({ onClose, onSubmit }: { onClose: () => void; on
       body={t('pos.closeShiftBody')}
       label={t('pos.countedCash')}
       submitLabel={t('pos.closeShift')}
+      icon="close"
       onClose={onClose}
       onSubmit={onSubmit}
       extraFooter={<Button variant="outline" onClick={onClose}>{t('common.cancel')}</Button>}
@@ -107,7 +133,7 @@ export function ShiftSummaryModal({ shift, onClose }: { shift: Shift; onClose: (
   const difference = Math.round((counted - expected) * 100) / 100;
   return (
     <Modal open onClose={onClose} title={t('pos.shiftClosed')} size="sm" footer={<Button variant="accent" onClick={onClose}>{t('common.close')}</Button>}>
-      <dl className="space-y-2 text-sm">
+      <dl className="space-y-2.5 text-sm">
         {[
           [t('pos.shiftSales'), `${formatCurrency(Number(shift.sales_total))} · ${t('dashboard.salesCount', { count: shift.sales_count })}`],
           [t('pos.expectedCash'), formatCurrency(expected)],
@@ -115,12 +141,19 @@ export function ShiftSummaryModal({ shift, onClose }: { shift: Shift; onClose: (
         ].map(([label, value]) => (
           <div key={label} className="flex justify-between">
             <dt className="text-brand-500">{label}</dt>
-            <dd className="font-semibold">{value}</dd>
+            <dd className="num font-semibold">{value}</dd>
           </div>
         ))}
-        <div className={`flex justify-between border-t border-brand-100 pt-2 text-base font-bold dark:border-brand-800 ${difference === 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+        <div
+          className={cn(
+            'mt-1 flex items-baseline justify-between rounded-xl px-4 py-3 text-base font-semibold',
+            difference === 0
+              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+              : 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300',
+          )}
+        >
           <dt>{t('pos.difference')}</dt>
-          <dd>{difference > 0 ? '+' : ''}{formatCurrency(difference)}</dd>
+          <dd className="num text-2xl">{difference > 0 ? '+' : ''}{formatCurrency(difference)}</dd>
         </div>
       </dl>
     </Modal>

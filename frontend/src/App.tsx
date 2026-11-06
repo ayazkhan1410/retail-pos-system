@@ -5,6 +5,7 @@ import DashboardLayout from '@/layouts/DashboardLayout';
 import POSLayout from '@/layouts/POSLayout';
 import LoginPage from '@/pages/LoginPage';
 import POSPage from '@/pages/POSPage';
+import { ConfirmHost, ToastHost } from '@/components/ui';
 import { setSessionExpiredHandler } from '@/services';
 import { homePath, useAuthStore } from '@/store';
 
@@ -28,7 +29,7 @@ function Requires({ permission }: { permission: string }) {
 function Spinner() {
   return (
     <div className="flex h-[100dvh] flex-1 items-center justify-center">
-      <span className="h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+      <span role="status" aria-label="Loading" className="h-7 w-7 animate-spin rounded-full border-2 border-brand-200 border-t-accent dark:border-brand-800 dark:border-t-accent" />
     </div>
   );
 }
@@ -47,6 +48,9 @@ export default function App() {
   if (!user) return <LoginPage />;
 
   return (
+    <>
+    <ConfirmHost />
+    <ToastHost />
     <Suspense fallback={<Spinner />}>
       <Routes>
         <Route element={<DashboardLayout />}>
@@ -87,5 +91,6 @@ export default function App() {
         <Route path="*" element={<Navigate to={homePath(user)} replace />} />
       </Routes>
     </Suspense>
+    </>
   );
 }

@@ -93,7 +93,7 @@ export default function SettingsPage() {
     <>
       <Header title={t('settings.title')} subtitle={t('settings.subtitle')} />
 
-      <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6">
+      <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
         <div className="mx-auto max-w-3xl space-y-6">
           {/* Language */}
           <Card hover>

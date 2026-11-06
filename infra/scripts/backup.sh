@@ -22,3 +22,18 @@ if ! docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"
   exit 1
 fi
 echo "Backup saved: $OUT"
+
+# Optional off-site copy. Set BACKUP_OFFSITE_DIR to a mounted USB/NAS path, or
+# BACKUP_OFFSITE_CMD to a full command (rclone, scp, aws s3 cp, …).
+# Example: BACKUP_OFFSITE_CMD='rclone copy {{file}} remote:smartshop-backups/'
+if [ -n "${BACKUP_OFFSITE_DIR:-}" ]; then
+  mkdir -p "$BACKUP_OFFSITE_DIR"
+  cp "$OUT" "$BACKUP_OFFSITE_DIR/"
+  echo "Copied off-site to: $BACKUP_OFFSITE_DIR/$(basename "$OUT")"
+fi
+
+if [ -n "${BACKUP_OFFSITE_CMD:-}" ]; then
+  CMD=$(printf '%s' "$BACKUP_OFFSITE_CMD" | sed "s|{{file}}|$OUT|g")
+  sh -c "$CMD"
+  echo "Off-site command finished."
+fi

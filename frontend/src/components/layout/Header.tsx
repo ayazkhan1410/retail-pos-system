@@ -2,6 +2,7 @@ import { Moon, Sun, Menu } from 'lucide-react';
 import { useThemeStore, useAppStore } from '@/store';
 import Button from '@/components/ui/Button';
 import LanguageToggle from '@/components/layout/LanguageToggle';
+import NotificationBell from '@/components/layout/NotificationBell';
 
 interface HeaderProps {
   title: string;
@@ -32,6 +33,7 @@ export default function Header({ title, subtitle, actions }: HeaderProps) {
 
       <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
         <LanguageToggle />
+        <NotificationBell />
         {actions}
         <Button variant="outline" size="sm" onClick={toggleTheme} aria-label="Toggle theme" className="!px-2.5">
           {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}

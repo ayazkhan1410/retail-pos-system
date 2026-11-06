@@ -3,18 +3,25 @@ from django.db import models
 
 
 class AppendOnlyModel(models.Model):
-    """History rows can be added but never edited or deleted through the app."""
+    """History rows can be added but never edited or deleted through the app.
+
+    Superusers may pass force=True from Django admin to clean up demo/bad data.
+    """
 
     class Meta:
         abstract = True
 
     def save(self, *args, **kwargs):
-        if self.pk:
+        force = kwargs.pop('force', False)
+        if self.pk and not force:
             raise ValueError(f'{type(self).__name__} records cannot be changed.')
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        raise ValueError(f'{type(self).__name__} records cannot be deleted.')
+        force = kwargs.pop('force', False)
+        if not force:
+            raise ValueError(f'{type(self).__name__} records cannot be deleted.')
+        super().delete(*args, **kwargs)
 
 
 class AuditLog(AppendOnlyModel):

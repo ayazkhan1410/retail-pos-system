@@ -33,6 +33,8 @@ class CustomUser(AbstractUser):
         null=True,
         blank=True,
     )
+    # Hashed 4–6 digit till PIN for quick cashier switching (not the login password).
+    pin = models.CharField(max_length=128, blank=True)
 
     objects = CustomUserManager()
 

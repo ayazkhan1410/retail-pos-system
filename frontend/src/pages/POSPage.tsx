@@ -24,6 +24,7 @@ import { getExpiryStatus } from '@/utils/inventoryUtils';
 import { printReceipt } from '@/utils/receiptPrint';
 import { apiErrorMessage } from '@/services';
 import { auditApi, customersApi, salesApi } from '@/services/endpoints';
+import CashQuickModal from '@/components/pos/CashQuickModal';
 import PaymentModal, { type PaymentResult } from '@/components/pos/PaymentModal';
 import { CloseShiftModal, OpenShiftModal, ShiftSummaryModal } from '@/components/pos/ShiftModals';
 import type { CartItem, Customer, PaymentMethod, Product, Sale, Shift, Terminal } from '@/types';
@@ -127,6 +128,8 @@ export default function POSPage() {
   const [closingShift, setClosingShift] = useState(false);
   const [closedShift, setClosedShift] = useState<Shift | null>(null);
   const [payMethod, setPayMethod] = useState<PaymentMethod | null>(null);
+  /** Cash uses the fast tender popup unless cashier opens the full payment form. */
+  const [fullPayForm, setFullPayForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [payError, setPayError] = useState('');
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
@@ -241,7 +244,12 @@ export default function POSPage() {
       const q = query.trim();
       if (!q) return;
 
-      const exact = products.find((p) => p.barcode.toLowerCase() === q.toLowerCase());
+      const needle = q.toLowerCase();
+      const exact = products.find(
+        (p) =>
+          p.barcode.toLowerCase() === needle
+          || (p.extraBarcodes ?? []).some((code) => code.toLowerCase() === needle),
+      );
       if (exact) {
         addProduct(exact);
         return;
@@ -272,6 +280,7 @@ export default function POSPage() {
     (method: PaymentMethod) => {
       if (cart.length === 0 || modalOpen) return;
       setPayError('');
+      setFullPayForm(method !== 'cash');
       setPayMethod(method);
     },
     [cart.length, modalOpen],
@@ -293,8 +302,13 @@ export default function POSPage() {
       applySale(cart.map((item) => ({ productId: item.product.id, quantity: item.quantity })));
       clearCart();
       setPayMethod(null);
+      setFullPayForm(false);
       setCompletedSale(sale);
       setNotice(null);
+      // Cash lane: print immediately so the next customer can start.
+      if (result.payments.every((p) => p.method === 'cash')) {
+        void printReceipt(sale);
+      }
     };
     try {
       const { data } = await salesApi.create(payload);
@@ -302,9 +316,8 @@ export default function POSPage() {
       void refreshShift(activeCounter.id).catch(() => undefined);
     } catch (err) {
       const lostConnection = !(err as { response?: unknown }).response;
-      const usesCredit = result.payments.some((payment) => payment.method === 'credit');
-      if (lostConnection && !usesCredit) {
-        // Server unreachable: finish the sale here and send it when the connection returns.
+      if (lostConnection) {
+        // Server unreachable: finish here (cash or khata) and sync when back online.
         queueSale({
           ...payload,
           offline: true,
@@ -317,7 +330,7 @@ export default function POSPage() {
         });
         afterSale(offlineSale(payload.client_uuid, activeCounter, user?.full_name ?? '', cart, result, subtotal));
       } else {
-        setPayError(apiErrorMessage(err, t(lostConnection ? 'pos.creditNeedsConnection' : 'pos.saleFailed')));
+        setPayError(apiErrorMessage(err, t('pos.saleFailed')));
       }
     } finally {
       setSubmitting(false);
@@ -744,8 +757,22 @@ export default function POSPage() {
       </div>
 
       <div className="text-brand-900 dark:text-brand-50">
+        <CashQuickModal
+          open={payMethod === 'cash' && !fullPayForm}
+          total={subtotal}
+          submitting={submitting}
+          error={payError}
+          onClose={() => {
+            setPayMethod(null);
+            setFullPayForm(false);
+            focusScanner();
+          }}
+          onNeedMoreOptions={() => setFullPayForm(true)}
+          onConfirm={(result) => void completeSale(result)}
+        />
+
         <PaymentModal
-          open={!!payMethod}
+          open={!!payMethod && (payMethod !== 'cash' || fullPayForm)}
           total={subtotal}
           initialMethod={payMethod ?? 'cash'}
           canDiscount={can('pos.discount')}
@@ -754,6 +781,7 @@ export default function POSPage() {
           error={payError}
           onClose={() => {
             setPayMethod(null);
+            setFullPayForm(false);
             focusScanner();
           }}
           onConfirm={(result) => void completeSale(result)}

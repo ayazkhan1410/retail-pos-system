@@ -20,6 +20,15 @@ export default defineConfig({
         target: process.env.VITE_PROXY_TARGET || 'http://localhost:8000',
         // Keep the browser's Host so Django's CSRF origin check matches.
         changeOrigin: false,
+        // Keep SSE streams open (notification feed).
+        timeout: 0,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            if (req.url?.includes('/notifications/stream')) {
+              proxyReq.setHeader('Accept', 'text/event-stream');
+            }
+          });
+        },
       },
     },
   },

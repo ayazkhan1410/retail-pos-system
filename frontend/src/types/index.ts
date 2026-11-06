@@ -8,8 +8,11 @@ export interface Product {
   sku: string;
   aluCode?: string;
   price: number;
-  /** Shelf price after the item's own running discount. */
+  /** Explicit till rate when set; otherwise salePrice follows price/discount. */
+  saleRate?: number;
+  /** Shelf price after the item's own running discount (or saleRate). */
   salePrice: number;
+  extraBarcodes?: string[];
   cost: number;
   stock: number;
   category: string;
@@ -124,7 +127,7 @@ export interface Shift {
   sales_count: number;
 }
 
-export type PaymentMethod = 'cash' | 'jazzcash' | 'easypaisa' | 'card' | 'credit';
+export type PaymentMethod = 'cash' | 'jazzcash' | 'easypaisa' | 'card' | 'credit' | 'raast';
 
 export interface SaleLine {
   id: number;
@@ -268,7 +271,7 @@ export interface GRNLine {
 export interface GRN {
   id?: number;
   number?: string | null;
-  status?: 'draft' | 'posted';
+  status?: 'draft' | 'posted' | 'voided';
   supplier: number | '';
   supplier_name?: string;
   date: string;
@@ -293,4 +296,36 @@ export interface GRNPreview {
   tax: string;
   total: string;
   lines: { line_total: string; unit_cost: string; margin_percent: string; previous_cost: string; warnings: string[] }[];
+}
+
+export type NotificationKind =
+  | 'low_stock'
+  | 'out_of_stock'
+  | 'expiry_soon'
+  | 'expired'
+  | 'system';
+
+export type NotificationSeverity = 'info' | 'warning' | 'critical';
+
+export interface AppNotification {
+  id: number;
+  kind: NotificationKind;
+  severity: NotificationSeverity;
+  title: string;
+  body: string;
+  payload: Record<string, unknown> & {
+    i18n_key?: string;
+    i18n_params?: Record<string, string | number>;
+  };
+  read_at: string | null;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface NotificationListResponse {
+  count: number;
+  page: number;
+  page_size: number;
+  unread_count: number;
+  results: AppNotification[];
 }

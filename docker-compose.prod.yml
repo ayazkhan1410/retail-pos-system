@@ -31,7 +31,8 @@ services:
       BACKUP_DIR: /app/backups
     volumes:
       - ./backups:/app/backups
-    command: sh -c "python manage.py migrate && gunicorn smartshop_pos.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    # gthread: short SSE streams share workers instead of pinning one sync worker each.
+    command: sh -c "python manage.py migrate && gunicorn smartshop_pos.wsgi:application --bind 0.0.0.0:8000 --workers 3 --threads 4 --worker-class gthread --timeout 70"
     depends_on:
       db:
         condition: service_healthy
@@ -55,7 +56,7 @@ services:
       - backend
     restart: unless-stopped
 
-  # A daily backup, keeping 14 days. Copy ./backups off this machine: one disk failure would lose both.
+  # A daily backup, keeping 14 days. Set BACKUP_OFFSITE_DIR (USB/NAS mount) so copies leave this disk.
   backup:
     image: postgres:16-alpine
     env_file:
@@ -63,16 +64,43 @@ services:
     environment:
       PGHOST: db
       PGPASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_OFFSITE_DIR: ${BACKUP_OFFSITE_DIR:-}
     volumes:
       - ./backups:/backups
+      - ${BACKUP_OFFSITE_DIR:-./backups}:/offsite
     command: >-
       sh -c 'while true; do
-      pg_dump -U "$$POSTGRES_USER" "$$POSTGRES_DB" > "/backups/auto-$$(date +%Y%m%d-%H%M%S).sql.tmp"
-      && mv /backups/auto-*.sql.tmp "/backups/auto-$$(date +%Y%m%d-%H%M%S).sql";
+      STAMP=$$(date +%Y%m%d-%H%M%S);
+      FILE="/backups/auto-$$STAMP.sql";
+      pg_dump -U "$$POSTGRES_USER" "$$POSTGRES_DB" > "$$FILE.tmp"
+      && mv "$$FILE.tmp" "$$FILE";
+      if [ -n "$$BACKUP_OFFSITE_DIR" ] && [ "$$BACKUP_OFFSITE_DIR" != "./backups" ]; then
+        cp "$$FILE" /offsite/;
+      fi;
       find /backups -name "auto-*.sql" -mtime +14 -delete;
       sleep 86400; done'
     depends_on:
       # Wait for migrations, or the first backup would be of an empty database.
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Expiry alerts without waiting for a stock movement (every 6 hours).
+  expiry-scan:
+    build:
+      context: .
+      dockerfile: infra/docker/backend.Dockerfile
+    env_file:
+      - .env
+    environment:
+      DJANGO_DEBUG: "False"
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+    command: >-
+      sh -c 'while true; do
+      python manage.py scan_expiry_alerts --force;
+      sleep 21600; done'
+    depends_on:
       backend:
         condition: service_healthy
     restart: unless-stopped

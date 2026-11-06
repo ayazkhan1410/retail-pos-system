@@ -98,14 +98,27 @@ class SaleSerializer(serializers.ModelSerializer):
 
 
 class ReturnLineInputSerializer(serializers.Serializer):
-    sale_line = serializers.PrimaryKeyRelatedField(queryset=SaleLine.objects.select_related('product'))
+    sale_line = serializers.PrimaryKeyRelatedField(
+        queryset=SaleLine.objects.select_related('product'), required=False, allow_null=True,
+    )
+    product = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.filter(active=True), required=False, allow_null=True,
+    )
+    unit_price = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=Decimal(0), required=False, allow_null=True,
+    )
     quantity = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=Decimal('0.001'))
     restock = serializers.BooleanField(default=True)
+
+    def validate(self, attrs):
+        if not attrs.get('sale_line') and not attrs.get('product'):
+            raise serializers.ValidationError('Provide sale_line or product.')
+        return attrs
 
 
 class ReturnInputSerializer(serializers.Serializer):
     client_uuid = serializers.UUIDField()
-    sale = serializers.PrimaryKeyRelatedField(queryset=Sale.objects.all())
+    sale = serializers.PrimaryKeyRelatedField(queryset=Sale.objects.all(), required=False, allow_null=True)
     terminal = serializers.PrimaryKeyRelatedField(queryset=Terminal.objects.filter(active=True), required=False)
     method = serializers.ChoiceField(choices=Payment.Method.choices)
     reason = serializers.CharField(max_length=255, required=False, allow_blank=True)

@@ -29,8 +29,10 @@ export interface ProductApi {
   costing_method: 'recent_cost' | 'manual_cost';
   cost?: string;
   price: string;
+  sale_rate: string | null;
   sale_price: string;
   stock: string;
+  extra_barcodes?: string[];
   sales_tax_percent: string;
   pct_code: string;
   disc_percent: string;
@@ -64,9 +66,11 @@ export function mapProductFromApi(data: ProductApi): Product {
     sku: data.barcode,
     aluCode: data.barcode,
     price: Number(data.price),
+    saleRate: data.sale_rate == null ? undefined : Number(data.sale_rate),
     salePrice: Number(data.sale_price),
     cost: Number(data.cost ?? 0),
     stock: Number(data.stock),
+    extraBarcodes: data.extra_barcodes ?? [],
     category: data.category,
     subCategory: data.sub_category,
     brand: data.brand,
@@ -133,6 +137,8 @@ export function mapProductToApi(data: ProductFormData, existing?: Product): Reco
     costing_method: data.costingMethod ?? 'recent_cost',
     cost: data.cost,
     price: data.price,
+    sale_rate: blankToNull(data.saleRate),
+    extra_barcodes: data.extraBarcodes ?? [],
     sales_tax_percent: data.salesTaxPercent ?? 0,
     pct_code: data.pctCode ?? '',
     disc_percent: data.discPercent ?? 0,

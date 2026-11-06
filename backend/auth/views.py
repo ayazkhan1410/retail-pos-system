@@ -1,10 +1,11 @@
 from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.hashers import check_password
 from django.db import transaction
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
@@ -52,6 +53,25 @@ class LogoutView(APIView):
         log_event(request.user, 'logout', request.user.email)
         logout(request)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class SwitchByPinView(APIView):
+    """Quick cashier switch on an open till — PIN only, no email/password."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'login'
+
+    def post(self, request):
+        pin = str(request.data.get('pin', '')).strip()
+        if not pin.isdigit() or not (4 <= len(pin) <= 6):
+            return Response({'detail': 'Enter a 4–6 digit PIN.'}, status=status.HTTP_400_BAD_REQUEST)
+        for user in CustomUser.objects.filter(is_active=True).exclude(pin='').iterator(chunk_size=100):
+            if check_password(pin, user.pin):
+                login(request, user)
+                log_event(user, 'login', user.email, {'via': 'pin'})
+                return Response({'user': UserSerializer(user).data})
+        return Response({'detail': 'Incorrect PIN.'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class UserListCreateView(generics.ListCreateAPIView):

@@ -29,6 +29,7 @@ const METHOD_KEYS: Record<string, string> = {
   cash: 'pos.cash',
   jazzcash: 'pos.jazzcash',
   easypaisa: 'pos.easypaisa',
+  raast: 'pos.raast',
   card: 'pos.cardShort',
   credit: 'pos.onCredit',
 };

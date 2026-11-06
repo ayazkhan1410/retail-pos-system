@@ -8,6 +8,7 @@ const METHODS: { method: PaymentMethod; labelKey: string }[] = [
   { method: 'cash', labelKey: 'pos.cash' },
   { method: 'jazzcash', labelKey: 'pos.jazzcash' },
   { method: 'easypaisa', labelKey: 'pos.easypaisa' },
+  { method: 'raast', labelKey: 'pos.raast' },
   { method: 'card', labelKey: 'pos.cardShort' },
   { method: 'credit', labelKey: 'pos.onCredit' },
 ];

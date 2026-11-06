@@ -6,7 +6,7 @@ from rest_framework import generics, serializers
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from audit.models import log_event
+from audit.services import log_event
 from auth.permissions import requires
 from finance.models import Expense
 from finance.services import financial_report, insights

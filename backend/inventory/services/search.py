@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from decimal import Decimal
 
 from django.conf import settings
@@ -15,7 +16,8 @@ from inventory.models import Product, ProductBarcode, StockLevel, default_branch
 logger = logging.getLogger(__name__)
 
 INDEX = 'tijori_products'
-MAX_RESULTS = 50
+MAX_RESULTS = 200
+_WILDCARD_META = re.compile(r'([\\*?])')
 
 
 class SearchUnavailable(APIException):
@@ -26,6 +28,10 @@ class SearchUnavailable(APIException):
 
 def es_enabled() -> bool:
     return bool(getattr(settings, 'ELASTICSEARCH_URL', '') or '')
+
+
+def index_name() -> str:
+    return getattr(settings, 'ELASTICSEARCH_INDEX', INDEX) or INDEX
 
 
 def _elasticsearch():
@@ -63,10 +69,11 @@ def _doc(product: Product, extra_barcodes: list[str] | None = None) -> dict:
 
 def ensure_index(client=None) -> None:
     client = client or get_client()
-    if client.indices.exists(index=INDEX):
+    name = index_name()
+    if client.indices.exists(index=name):
         return
     client.indices.create(
-        index=INDEX,
+        index=name,
         settings={
             'number_of_shards': 1,
             'number_of_replicas': 0,
@@ -90,7 +97,11 @@ def ensure_index(client=None) -> None:
                 },
                 'barcode': {'type': 'keyword'},
                 'extra_barcodes': {'type': 'keyword'},
-                'brand': {'type': 'text', 'analyzer': 'product_text'},
+                'brand': {
+                    'type': 'text',
+                    'analyzer': 'product_text',
+                    'fields': {'keyword': {'type': 'keyword'}},
+                },
                 'category': {'type': 'keyword'},
                 'active': {'type': 'boolean'},
             },
@@ -104,7 +115,7 @@ def index_product(product: Product) -> None:
     try:
         client = get_client()
         ensure_index(client)
-        client.index(index=INDEX, id=str(product.pk), document=_doc(product), refresh=True)
+        client.index(index=index_name(), id=str(product.pk), document=_doc(product), refresh=True)
     except Exception:
         logger.exception('Failed to index product %s', product.pk)
 
@@ -115,16 +126,19 @@ def delete_product(product_id: int) -> None:
     _, NotFoundError, _ = _elasticsearch()
     try:
         client = get_client()
-        client.delete(index=INDEX, id=str(product_id), refresh=True)
+        client.delete(index=index_name(), id=str(product_id), refresh=True)
     except NotFoundError:
         pass
     except Exception:
         logger.exception('Failed to remove product %s from search index', product_id)
 
 
-def reindex_all() -> int:
+def reindex_all(*, recreate: bool = False) -> int:
     _, _, bulk = _elasticsearch()
     client = get_client()
+    name = index_name()
+    if recreate and client.indices.exists(index=name):
+        client.indices.delete(index=name)
     ensure_index(client)
     extras = {}
     for row in ProductBarcode.objects.values_list('product_id', 'barcode'):
@@ -134,7 +148,7 @@ def reindex_all() -> int:
         for product in Product.objects.select_related('category').iterator(chunk_size=500):
             yield {
                 '_op_type': 'index',
-                '_index': INDEX,
+                '_index': name,
                 '_id': str(product.pk),
                 '_source': _doc(product, extras.get(product.pk, [])),
             }
@@ -145,6 +159,10 @@ def reindex_all() -> int:
     return success
 
 
+def _contains_pattern(value: str) -> str:
+    return f'*{_WILDCARD_META.sub(r"\\\1", value)}*'
+
+
 def search_product_ids(query: str, *, include_inactive: bool = False, limit: int = MAX_RESULTS) -> list[int]:
     """Ranked product primary keys from Elasticsearch. Raises SearchUnavailable if ES is down."""
     q = (query or '').strip()
@@ -153,28 +171,42 @@ def search_product_ids(query: str, *, include_inactive: bool = False, limit: int
     client = get_client()
     ensure_index(client)
     must_not = [] if include_inactive else [{'term': {'active': False}}]
-    query = {
+    contains = _contains_pattern(q)
+    # Shop tills expect substring search (like the old client filter), not only whole-token matches.
+    should = [
+        {'term': {'barcode': {'value': q, 'boost': 30}}},
+        {'prefix': {'barcode': {'value': q, 'boost': 18}}},
+        {'wildcard': {'barcode': {'value': contains, 'case_insensitive': True, 'boost': 12}}},
+        {'term': {'extra_barcodes': {'value': q, 'boost': 24}}},
+        {'wildcard': {'extra_barcodes': {'value': contains, 'case_insensitive': True, 'boost': 10}}},
+        {'wildcard': {'name.keyword': {'value': contains, 'case_insensitive': True, 'boost': 16}}},
+        {'wildcard': {'brand.keyword': {'value': contains, 'case_insensitive': True, 'boost': 8}}},
+        {'wildcard': {'category': {'value': contains, 'case_insensitive': True, 'boost': 4}}},
+        {'match_bool_prefix': {'name': {'query': q, 'boost': 10}}},
+        {
+            'multi_match': {
+                'query': q,
+                'fields': ['name^6', 'brand^2'],
+                'type': 'best_fields',
+                'fuzziness': 'AUTO' if len(q) >= 3 else 0,
+                'prefix_length': 1,
+                'boost': 5,
+            },
+        },
+    ]
+    body = {
         'bool': {
             'must_not': must_not,
-            'should': [
-                {'term': {'barcode': {'value': q, 'boost': 20}}},
-                {'term': {'extra_barcodes': {'value': q, 'boost': 18}}},
-                {
-                    'multi_match': {
-                        'query': q,
-                        'fields': ['name^4', 'brand^2', 'category'],
-                        'type': 'best_fields',
-                        'fuzziness': 'AUTO',
-                        'prefix_length': 1,
-                    },
-                },
-                {'match_phrase_prefix': {'name': {'query': q, 'boost': 3}}},
-            ],
+            'should': should,
             'minimum_should_match': 1,
         },
     }
     try:
-        result = client.search(index=INDEX, size=min(max(limit, 1), MAX_RESULTS), query=query)
+        result = client.search(
+            index=index_name(),
+            size=min(max(limit, 1), MAX_RESULTS),
+            query=body,
+        )
     except Exception as exc:
         logger.exception('Elasticsearch query failed')
         raise SearchUnavailable() from exc
@@ -184,7 +216,7 @@ def search_product_ids(query: str, *, include_inactive: bool = False, limit: int
 def products_for_ids(ids: list[int]):
     """Preserve ES ranking while attaching current stock."""
     if not ids:
-        return Product.objects.none()
+        return []
     level = StockLevel.objects.filter(product=OuterRef('pk'), branch=default_branch()).values('quantity')[:1]
     queryset = Product.objects.select_related('category', 'supplier').annotate(
         stock=Coalesce(

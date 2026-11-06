@@ -1,31 +1,22 @@
 import csv
 import io
-from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import DecimalField, OuterRef, Subquery, Value
-from django.db.models.functions import Coalesce
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from audit.models import log_event
+from audit.services import log_event
 from auth.permissions import requires
-from inventory.models import Category, Product, StockLevel, default_branch
-from inventory.search import products_for_ids, search_product_ids
+from inventory.models import Category, Product, default_branch
 from inventory.serializers import AdjustStockInput, BranchSerializer, ProductSerializer
-from inventory.services import set_stock, write_off_expired
-
-
-def products_with_stock():
-    level = StockLevel.objects.filter(product=OuterRef('pk'), branch=default_branch()).values('quantity')[:1]
-    return Product.objects.select_related('category', 'supplier').annotate(
-        stock=Coalesce(
-            Subquery(level),
-            Value(Decimal(0)),
-            output_field=DecimalField(max_digits=12, decimal_places=3),
-        ),
-    ).order_by('name')
+from inventory.services import (
+    products_for_ids,
+    products_with_stock,
+    search_product_ids,
+    set_stock,
+    write_off_expired,
+)
 
 
 class ProductListCreateView(generics.ListCreateAPIView):

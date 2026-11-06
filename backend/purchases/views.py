@@ -10,7 +10,14 @@ from rest_framework.views import APIView
 from auth.permissions import requires
 from inventory.models import Product, default_branch
 from purchases.models import GRN, GRNLine, PurchaseReturn, PurchaseReturnLine
-from purchases.services import calculate, post_grn, post_purchase_return, void_grn
+from purchases.services import (
+    calculate,
+    post_grn,
+    post_purchase_return,
+    save_grn_draft,
+    save_purchase_return_draft,
+    void_grn,
+)
 from suppliers.models import PaymentType, Supplier
 
 MONEY = {'max_digits': 14, 'decimal_places': 2, 'min_value': Decimal(0)}
@@ -69,22 +76,6 @@ class GRNSerializer(serializers.ModelSerializer):
         exclude = ('branch', 'created_by', 'posted_by')
 
 
-def _save_lines(grn, values):
-    lines = values.pop('lines')
-    result = calculate(values, lines)
-    for field, value in values.items():
-        setattr(grn, field, value)
-    grn.subtotal = result['subtotal']
-    grn.total = result['total']
-    grn.save()
-    grn.lines.all().delete()
-    GRNLine.objects.bulk_create([
-        GRNLine(grn=grn, line_total=computed['line_total'], unit_cost=computed['unit_cost'], margin_percent=computed['margin_percent'], **line)
-        for line, computed in zip(lines, result['lines'], strict=True)
-    ])
-    return grn
-
-
 class GRNPagination(PageNumberPagination):
     page_size = 50
 
@@ -105,7 +96,7 @@ class GRNListCreateView(APIView):
     def post(self, request):
         data = GRNInput(data=request.data)
         data.is_valid(raise_exception=True)
-        grn = _save_lines(GRN(branch=default_branch(), created_by=request.user), dict(data.validated_data))
+        grn = save_grn_draft(GRN(branch=default_branch(), created_by=request.user), dict(data.validated_data))
         return Response(GRNSerializer(grn).data, status=status.HTTP_201_CREATED)
 
 
@@ -142,7 +133,7 @@ class GRNDetailView(APIView):
     def put(self, request, pk):
         data = GRNInput(data=request.data)
         data.is_valid(raise_exception=True)
-        return Response(GRNSerializer(_save_lines(self._draft(pk), dict(data.validated_data))).data)
+        return Response(GRNSerializer(save_grn_draft(self._draft(pk), dict(data.validated_data))).data)
 
     @transaction.atomic
     def delete(self, request, pk):
@@ -206,27 +197,6 @@ class PurchaseReturnSerializer(serializers.ModelSerializer):
         exclude = ('branch', 'created_by', 'posted_by')
 
 
-def _save_purchase_return(row, values):
-    lines = values.pop('lines')
-    for field, value in values.items():
-        setattr(row, field, value)
-    row.total = sum((line['quantity'] * line['rate'] for line in lines), Decimal(0))
-    row.total = Decimal(row.total).quantize(Decimal('0.01'))
-    row.save()
-    row.lines.all().delete()
-    PurchaseReturnLine.objects.bulk_create([
-        PurchaseReturnLine(
-            purchase_return=row,
-            product=line['product'],
-            quantity=line['quantity'],
-            rate=line['rate'],
-            line_total=(line['quantity'] * line['rate']).quantize(Decimal('0.01')),
-        )
-        for line in lines
-    ])
-    return row
-
-
 class PurchaseReturnListCreateView(APIView):
     permission_classes = [requires('purchases.view', 'purchases.edit')]
 
@@ -240,7 +210,7 @@ class PurchaseReturnListCreateView(APIView):
     def post(self, request):
         data = PurchaseReturnInput(data=request.data)
         data.is_valid(raise_exception=True)
-        row = _save_purchase_return(
+        row = save_purchase_return_draft(
             PurchaseReturn(branch=default_branch(), created_by=request.user),
             dict(data.validated_data),
         )
@@ -273,7 +243,7 @@ class PurchaseReturnDetailView(APIView):
     def put(self, request, pk):
         data = PurchaseReturnInput(data=request.data)
         data.is_valid(raise_exception=True)
-        row = _save_purchase_return(self._draft(pk), dict(data.validated_data))
+        row = save_purchase_return_draft(self._draft(pk), dict(data.validated_data))
         return Response(PurchaseReturnSerializer(row).data)
 
     @transaction.atomic

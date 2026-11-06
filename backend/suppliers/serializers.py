@@ -3,7 +3,8 @@ from decimal import Decimal
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import Supplier, SupplierLedgerEntry, post_supplier_entry
+from .models import Supplier, SupplierLedgerEntry
+from suppliers.services import post_supplier_entry
 
 
 class UniqueNameMixin:

@@ -4,7 +4,7 @@ from django.db import transaction
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
-from audit.models import log_event
+from audit.services import log_event
 from inventory.models import Branch, Category, Product, ProductBarcode, StockMovement, default_branch
 from inventory.services import add_batch, set_stock
 

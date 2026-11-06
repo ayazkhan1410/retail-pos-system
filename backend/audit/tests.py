@@ -1,7 +1,7 @@
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from audit.models import log_event
+from audit.services import log_event
 from auth.models import CustomUser, UserRole
 
 

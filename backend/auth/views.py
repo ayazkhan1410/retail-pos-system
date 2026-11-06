@@ -10,7 +10,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from audit.models import log_event
+from audit.services import log_event
 from auth.catalog import ALL_PERMISSIONS
 from auth.models import CustomUser, RolePermission, UserRole
 from auth.permissions import IsOwner, requires

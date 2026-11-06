@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db import models, transaction
+from django.db import models
 
 from audit.models import AppendOnlyModel
 
@@ -62,13 +62,3 @@ class SupplierLedgerEntry(AppendOnlyModel):
 
     class Meta:
         ordering = ['-id']
-
-
-def post_supplier_entry(supplier_id, delta, kind, user, method='', reference=''):
-    with transaction.atomic():
-        supplier = Supplier.objects.select_for_update().get(pk=supplier_id)
-        supplier.credit_balance += delta
-        supplier.save(update_fields=['credit_balance', 'updated_at'])
-        return SupplierLedgerEntry.objects.create(
-            supplier=supplier, delta=delta, kind=kind, method=method, reference=reference, user=user,
-        )

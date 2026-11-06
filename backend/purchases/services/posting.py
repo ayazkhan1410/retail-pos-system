@@ -4,11 +4,12 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from audit.models import log_event
+from audit.services import log_event
 from inventory.models import CENT, Branch, Product, StockMovement
 from inventory.services import add_batch, move_stock
 from purchases.models import GRN
-from suppliers.models import PaymentType, SupplierLedgerEntry, post_supplier_entry
+from suppliers.models import PaymentType, SupplierLedgerEntry
+from suppliers.services import post_supplier_entry
 
 
 def _money(value):

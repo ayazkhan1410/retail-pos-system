@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -132,7 +133,12 @@ AUTH_USER_MODEL = 'custom_auth.CustomUser'
 BACKUP_DIR = os.getenv('BACKUP_DIR', str(BASE_DIR / 'backups'))
 
 # Product search (bulk catalogue). Empty disables indexing/search endpoints fail closed.
+# Django tests must not write into the live shop index (same ES hosts many DBs by product id).
 ELASTICSEARCH_URL = os.getenv('ELASTICSEARCH_URL', '').rstrip('/')
+ELASTICSEARCH_INDEX = os.getenv('ELASTICSEARCH_INDEX', 'tijori_products')
+if len(sys.argv) > 1 and sys.argv[1] == 'test':
+    ELASTICSEARCH_URL = ''
+
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [

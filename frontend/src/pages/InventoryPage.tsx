@@ -89,6 +89,7 @@ export default function InventoryPage() {
           if (!cancelled) setSearchHits(data.results.map(mapProductFromApi));
         })
         .catch(() => {
+          // ES down / 503 — fall back to in-memory catalogue filter.
           if (!cancelled) setSearchHits(null);
         });
     }, 220);

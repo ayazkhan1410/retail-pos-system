@@ -184,7 +184,7 @@ def _staff_review(today):
 
 
 def _heatmap_and_peak(queryset):
-    """Weekday × hour counts for any sale queryset (Mon=0 … Sun=6)."""
+    """Weekday x hour counts for any sale queryset (Mon=0 ... Sun=6)."""
     heat_rows = (
         queryset.annotate(weekday=ExtractWeekDay('created_at'), hour=ExtractHour('created_at'))
         .values('weekday', 'hour')

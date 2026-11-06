@@ -89,6 +89,21 @@ class NotificationStockAlertTests(TransactionTestCase):
         self.assertEqual(note.kind, Notification.Kind.LOW_STOCK)
         self.assertEqual(note.payload.get('i18n_key'), 'notifications.alerts.lowStock')
 
+    def test_low_stock_stays_quiet_after_read_until_restock(self):
+        notify_stock_level(self.product, self.branch, Decimal(5))
+        key = stock_dedupe_key(self.product.pk, self.branch.pk)
+        note = Notification.objects.get(recipient=self.owner, dedupe_key=key)
+        note.read_at = timezone.now()
+        note.save(update_fields=['read_at'])
+        notify_stock_level(self.product, self.branch, Decimal(3))
+        self.assertEqual(Notification.objects.filter(dedupe_key=key).count(), 1)
+        notify_stock_level(self.product, self.branch, Decimal(50))
+        notify_stock_level(self.product, self.branch, Decimal(2))
+        self.assertEqual(
+            Notification.objects.filter(recipient=self.owner, dedupe_key=key, read_at__isnull=True).count(),
+            1,
+        )
+
     def test_restock_clears_alerts(self):
         notify_stock_level(self.product, self.branch, Decimal(2))
         key = stock_dedupe_key(self.product.pk, self.branch.pk)
@@ -126,4 +141,22 @@ class NotificationStockAlertTests(TransactionTestCase):
                 payload__product_id=self.product.pk,
                 read_at__isnull=True,
             ).exists(),
+        )
+
+    def test_expiry_scan_does_not_duplicate(self):
+        from notifications.services import notify_expiry
+
+        self.product.track_expiry = True
+        self.product.expiry_date = timezone.localdate() + timedelta(days=2)
+        self.product.save(update_fields=['track_expiry', 'expiry_date'])
+        notify_expiry(self.product, branch=self.branch)
+        scan_expiry_alerts(force=True)
+        scan_expiry_alerts(force=True)
+        self.assertEqual(
+            Notification.objects.filter(
+                recipient=self.owner,
+                kind=Notification.Kind.EXPIRY_SOON,
+                payload__product_id=self.product.pk,
+            ).count(),
+            1,
         )

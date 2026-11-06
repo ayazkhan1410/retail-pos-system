@@ -8,6 +8,8 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
   size?: Size;
   loading?: boolean;
+  /** Square button for a lone icon; give it an aria-label. */
+  iconOnly?: boolean;
 }
 
 const variants: Record<Variant, string> = {
@@ -22,7 +24,7 @@ const variants: Record<Variant, string> = {
     'bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-500',
   outline:
     'border border-brand-200 bg-white text-brand-800 shadow-soft hover:border-brand-300 hover:bg-brand-50 dark:border-brand-700 dark:bg-brand-900 dark:text-brand-100 dark:hover:bg-brand-800',
-  // Brand green: the action that completes the job on screen (sell, save, confirm).
+  // Tijori indigo: the action that completes the job on screen (sell, save, confirm).
   accent:
     'bg-accent text-white shadow-glow hover:bg-accent-light',
 };
@@ -35,7 +37,7 @@ const sizes: Record<Size, string> = {
 };
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = 'primary', size = 'md', loading, disabled, children, ...props }, ref) => (
+  ({ className, variant = 'primary', size = 'md', loading, iconOnly, disabled, children, ...props }, ref) => (
     <button
       ref={ref}
       disabled={disabled || loading}
@@ -44,6 +46,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         'inline-flex select-none items-center justify-center whitespace-nowrap font-semibold transition-[background-color,border-color,color,box-shadow,transform] duration-150 active:scale-[0.98] focus-ring disabled:cursor-not-allowed disabled:opacity-45 disabled:shadow-none disabled:active:scale-100',
         variants[variant],
         sizes[size],
+        iconOnly && 'aspect-square !px-0',
         className,
       )}
       {...props}

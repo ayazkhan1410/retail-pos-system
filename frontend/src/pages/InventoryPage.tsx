@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Search, Pencil, Trash2, Package, AlertTriangle, Filter, X, Printer, Scale, Upload, Ban } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, AlertTriangle, Filter, X, Printer, Scale, Upload, Ban } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Card, Button, Input, Badge, StockBadge, Modal, Select } from '@/components/ui';
-import { formatCurrency, cn } from '@/utils';
+import { Card, Button, Input, Badge, StockBadge, Modal, Select, StatStrip, confirmAction, type StatItem } from '@/components/ui';
+import { formatCurrency } from '@/utils';
 import {
   emptyInventoryFilters,
   filterProducts,
@@ -130,7 +130,7 @@ export default function InventoryPage() {
   };
 
   const handleDelete = async (product: Product) => {
-    if (!window.confirm(t('inventory.confirmDelete', { name: product.name }))) return;
+    if (!(await confirmAction({ title: t('inventory.confirmDelete', { name: product.name }), tone: 'danger' }))) return;
     setError('');
     try {
       await deleteProduct(product.id);
@@ -156,7 +156,7 @@ export default function InventoryPage() {
   };
 
   const writeOff = async (product: Product) => {
-    if (!window.confirm(t('inventory.confirmWriteOff', { name: product.name }))) return;
+    if (!(await confirmAction({ title: t('inventory.confirmWriteOff', { name: product.name }), tone: 'danger' }))) return;
     try {
       await inventoryApi.writeOffExpired(product.id);
       await fetchProducts();
@@ -185,12 +185,12 @@ export default function InventoryPage() {
     setLabelModalOpen(true);
   };
 
-  const statCards = [
-    { key: 'total', label: t('inventory.totalProducts'), value: stats.total, icon: Package, onClick: () => clearFilters() },
-    { key: 'low', label: t('inventory.lowStock'), value: stats.low_stock, color: 'text-amber-600', onClick: () => applyStockQuickFilter('low_stock') },
-    { key: 'out', label: t('inventory.outOfStock'), value: stats.out_of_stock, color: 'text-red-600', onClick: () => applyStockQuickFilter('out_of_stock') },
-    { key: 'expiring', label: t('inventory.expiringSoon'), value: stats.expiringSoon, color: 'text-orange-600', onClick: () => applyExpiryQuickFilter('expiring_soon') },
-    { key: 'expired', label: t('inventory.expired'), value: stats.expired, color: 'text-red-700', onClick: () => applyExpiryQuickFilter('expired') },
+  const statCards: StatItem[] = [
+    { key: 'total', label: t('inventory.totalProducts'), value: stats.total, onClick: () => clearFilters(), active: false },
+    { key: 'low', label: t('inventory.lowStock'), value: stats.low_stock, tone: stats.low_stock ? 'warn' : 'default', onClick: () => applyStockQuickFilter('low_stock'), active: filters.stockStatus === 'low_stock' },
+    { key: 'out', label: t('inventory.outOfStock'), value: stats.out_of_stock, tone: stats.out_of_stock ? 'danger' : 'default', onClick: () => applyStockQuickFilter('out_of_stock'), active: filters.stockStatus === 'out_of_stock' },
+    { key: 'expiring', label: t('inventory.expiringSoon'), value: stats.expiringSoon, tone: stats.expiringSoon ? 'warn' : 'default', onClick: () => applyExpiryQuickFilter('expiring_soon'), active: filters.expiryFilter === 'expiring_soon' },
+    { key: 'expired', label: t('inventory.expired'), value: stats.expired, tone: stats.expired ? 'danger' : 'default', onClick: () => applyExpiryQuickFilter('expired'), active: filters.expiryFilter === 'expired' },
   ];
 
   return (
@@ -218,35 +218,7 @@ export default function InventoryPage() {
           </p>
         )}
         {importResult && <p role="status" className="mb-4 rounded-xl border border-brand-200 bg-white px-4 py-3 text-sm dark:border-brand-700 dark:bg-brand-900">{importResult}</p>}
-        <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          {statCards.map((s) => (
-            <button key={s.key} type="button" onClick={s.onClick} className="text-left">
-              <Card
-                padding="sm"
-                hover
-                className={cn(
-                  'flex items-center gap-4 transition-all',
-                  (s.key === 'low' && filters.stockStatus === 'low_stock') ||
-                  (s.key === 'out' && filters.stockStatus === 'out_of_stock') ||
-                  (s.key === 'expiring' && filters.expiryFilter === 'expiring_soon') ||
-                  (s.key === 'expired' && filters.expiryFilter === 'expired')
-                    ? 'ring-2 ring-accent/40'
-                    : '',
-                )}
-              >
-                {'icon' in s && s.icon && (
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent/10">
-                    <s.icon className="h-5 w-5 text-accent" />
-                  </div>
-                )}
-                <div>
-                  <p className="text-sm text-brand-500">{s.label}</p>
-                  <p className={cn('font-display text-2xl font-bold', s.color)}>{s.value}</p>
-                </div>
-              </Card>
-            </button>
-          ))}
-        </div>
+        <StatStrip className="mb-6" items={statCards} />
 
         <Card padding="none" hover>
           <div className="space-y-4 border-b border-brand-100 p-4 dark:border-brand-800">
@@ -321,55 +293,52 @@ export default function InventoryPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="data-table">
               <thead>
-                <tr className="border-b border-brand-100 bg-brand-50/50 text-left text-xs font-semibold uppercase tracking-wider text-brand-500 dark:border-brand-800 dark:bg-brand-800/30">
-                  <th className="px-4 py-3 sm:px-6">{t('inventory.itemCode')}</th>
-                  <th className="px-4 py-3 sm:px-6">{t('inventory.itemDescription')}</th>
-                  <th className="px-4 py-3 text-right sm:px-6">{t('inventory.qtyOnHand')}</th>
-                  {can('products.view_cost') && <th className="px-4 py-3 text-right sm:px-6">{t('inventory.cost')}</th>}
-                  <th className="px-4 py-3 text-right sm:px-6">{t('inventory.rate')}</th>
-                  <th className="px-4 py-3 sm:px-6">{t('inventory.category')}</th>
-                  <th className="px-4 py-3 sm:px-6">{t('inventory.expiryDate')}</th>
-                  <th className="px-4 py-3 sm:px-6">{t('inventory.status')}</th>
-                  <th className="w-20 px-4 py-3 sm:px-6" />
+                <tr className="text-start">
+                  <th>{t('inventory.itemCode')}</th>
+                  <th>{t('inventory.itemDescription')}</th>
+                  <th className="text-end">{t('inventory.qtyOnHand')}</th>
+                  {can('products.view_cost') && <th className="text-end">{t('inventory.cost')}</th>}
+                  <th className="text-end">{t('inventory.rate')}</th>
+                  <th>{t('inventory.category')}</th>
+                  <th>{t('inventory.expiryDate')}</th>
+                  <th>{t('inventory.status')}</th>
+                  <th className="w-px"><span className="sr-only">{t('inventory.actions')}</span></th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((product) => {
                   const status = deriveStockStatus(product);
                   return (
-                    <tr
-                      key={product.id}
-                      className="border-b border-brand-50 transition-colors hover:bg-brand-50/80 dark:border-brand-800/40 dark:hover:bg-brand-800/20"
-                    >
-                      <td className="px-4 py-3 font-mono text-xs font-medium sm:px-6">{getItemCode(product)}</td>
-                      <td className="px-4 py-3 font-medium sm:px-6">{product.name}</td>
-                      <td className="px-4 py-3 text-right font-semibold sm:px-6">{product.stock}</td>
-                      {can('products.view_cost') && <td className="px-4 py-3 text-right text-brand-500 sm:px-6">{formatCurrency(product.cost)}</td>}
-                      <td className="px-4 py-3 text-right font-semibold sm:px-6">{formatCurrency(product.price)}</td>
-                      <td className="px-4 py-3 sm:px-6"><Badge>{product.category}</Badge></td>
-                      <td className="px-4 py-3 sm:px-6"><ExpiryCell expiryDate={product.expiryDate} /></td>
-                      <td className="px-4 py-3 sm:px-6"><StockBadge status={status} /></td>
-                      <td className="px-4 py-3 sm:px-6">
-                        <div className="flex gap-1">
+                    <tr key={product.id}>
+                      <td className="num whitespace-nowrap text-xs text-brand-500 dark:text-brand-400">{getItemCode(product)}</td>
+                      <td className="min-w-[11rem] font-medium">{product.name}</td>
+                      <td className="text-end font-semibold">{product.stock}</td>
+                      {can('products.view_cost') && <td className="num whitespace-nowrap text-end text-brand-500">{formatCurrency(product.cost)}</td>}
+                      <td className="num whitespace-nowrap text-end font-semibold">{formatCurrency(product.price)}</td>
+                      <td><Badge>{product.category}</Badge></td>
+                      <td className="whitespace-nowrap"><ExpiryCell expiryDate={product.expiryDate} /></td>
+                      <td><StockBadge status={status} /></td>
+                      <td>
+                        <div className="flex justify-end gap-0.5">
                           {can('stock.adjust') && (
-                            <Button variant="ghost" size="sm" aria-label={t('inventory.adjustStock')} title={t('inventory.adjustStock')} onClick={() => { setError(''); setCounted(String(product.stock)); setAdjustReason('count'); setAdjusting(product); }}>
+                            <Button variant="ghost" size="sm" iconOnly aria-label={t('inventory.adjustStock')} title={t('inventory.adjustStock')} onClick={() => { setError(''); setCounted(String(product.stock)); setAdjustReason('count'); setAdjusting(product); }}>
                               <Scale className="h-3.5 w-3.5" />
                             </Button>
                           )}
                           {can('stock.adjust') && getExpiryStatus(product.expiryDate) === 'expired' && (
-                            <Button variant="ghost" size="sm" aria-label={t('inventory.writeOff')} title={t('inventory.writeOff')} className="text-red-500" onClick={() => void writeOff(product)}>
+                            <Button variant="ghost" size="sm" iconOnly aria-label={t('inventory.writeOff')} title={t('inventory.writeOff')} className="text-red-500" onClick={() => void writeOff(product)}>
                               <Ban className="h-3.5 w-3.5" />
                             </Button>
                           )}
-                          <Button variant="ghost" size="sm" onClick={() => openLabelPrint(product)} title={t('inventory.printLabel')}>
+                          <Button variant="ghost" size="sm" iconOnly onClick={() => openLabelPrint(product)} title={t('inventory.printLabel')} aria-label={t('inventory.printLabel')}>
                             <Printer className="h-3.5 w-3.5" />
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => { setError(''); setEditingProduct(product); setModalOpen(true); }}>
+                          <Button variant="ghost" size="sm" iconOnly aria-label={t('common.edit')} title={t('common.edit')} onClick={() => { setError(''); setEditingProduct(product); setModalOpen(true); }}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => void handleDelete(product)} className="text-red-500 hover:text-red-600">
+                          <Button variant="ghost" size="sm" iconOnly aria-label={t('common.delete')} title={t('common.delete')} onClick={() => void handleDelete(product)} className="text-red-500 hover:text-red-600">
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>

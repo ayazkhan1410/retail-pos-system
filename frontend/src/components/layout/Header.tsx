@@ -16,7 +16,7 @@ export default function Header({ title, subtitle, actions }: HeaderProps) {
 
   return (
     <header className="sticky top-0 z-20 shrink-0 border-b border-brand-200 bg-white/90 backdrop-blur-md dark:border-brand-800 dark:bg-brand-950/90">
-      <div className="flex min-h-16 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:px-6 lg:px-8">
+      <div className="flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 sm:px-6 lg:px-7">
         <button
           type="button"
           onClick={() => setMobileSidebarOpen(true)}
@@ -26,8 +26,8 @@ export default function Header({ title, subtitle, actions }: HeaderProps) {
           <Menu className="h-[18px] w-[18px]" />
         </button>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-lg font-semibold tracking-tight text-brand-900 sm:text-xl dark:text-white">{title}</h1>
-          {subtitle && <p className="truncate text-sm text-brand-500 dark:text-brand-400">{subtitle}</p>}
+          <h1 className="truncate text-[17px] font-semibold tracking-tight text-brand-900 dark:text-white">{title}</h1>
+          {subtitle && <p className="truncate text-[13px] text-brand-500 dark:text-brand-400">{subtitle}</p>}
         </div>
 
         <div className="flex items-center gap-2">

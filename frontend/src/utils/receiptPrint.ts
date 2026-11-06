@@ -24,7 +24,7 @@ async function loadStore(): Promise<Pick<Branch, 'name' | 'address' | 'phone' | 
     localStorage.setItem(STORE_CACHE, JSON.stringify(data));
     return data;
   } catch {
-    return JSON.parse(localStorage.getItem(STORE_CACHE) ?? 'null') ?? { name: 'SmartShop', address: '', phone: '', ntn: '' };
+    return JSON.parse(localStorage.getItem(STORE_CACHE) ?? 'null') ?? { name: 'Tijori POS', address: '', phone: '', ntn: '' };
   }
 }
 

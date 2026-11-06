@@ -15,7 +15,7 @@ import {
   BarChart3,
 } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Card, CardHeader, CardTitle, CardDescription, KPICard, Badge, EmptyState, ErrorState, Skeleton } from '@/components/ui';
+import { Card, CardHeader, CardTitle, CardDescription, Badge, EmptyState, ErrorState, Skeleton } from '@/components/ui';
 import { salesApi } from '@/services/endpoints';
 import { useCan } from '@/store';
 import { cn, formatCurrency, formatCurrencyCompact, formatDate } from '@/utils';
@@ -87,7 +87,7 @@ export default function DashboardPage() {
       actions={can('pos.sell') && (
         <Link
           to="/pos"
-          className="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-semibold text-white shadow-glow transition-colors hover:bg-accent-light focus-ring"
+          className="inline-flex h-9 items-center gap-2 rounded-lg bg-brand-900 px-3.5 text-sm font-medium text-white shadow-soft transition-colors hover:bg-brand-800 focus-ring dark:bg-white dark:text-brand-900 dark:hover:bg-brand-100"
         >
           <ShoppingCart className="h-4 w-4" />
           {t('common.openPos')}
@@ -148,115 +148,66 @@ export default function DashboardPage() {
 
       <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
         <div className="mx-auto max-w-[1440px] space-y-4 sm:space-y-6">
-          {/* Today: the number the owner opens this page for */}
-          <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
-            <Card padding="none" className="overflow-hidden lg:col-span-2">
-              <div className="grid gap-6 p-5 sm:p-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-                <div className="flex flex-col">
-                  <p className="text-sm font-medium text-brand-600 dark:text-brand-300">{t('dashboard.kpiTodaySales')}</p>
-                  <p className="num mt-2 text-4xl font-semibold leading-none text-brand-900 sm:text-5xl dark:text-white">
-                    {formatCurrency(revenue)}
-                  </p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-brand-500 dark:text-brand-400">
-                    {yesterday > 0 ? (
-                      <>
-                        <span
-                          className={cn(
-                            'inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs font-semibold tabular-nums',
-                            change >= 0
-                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                              : 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300',
-                          )}
-                        >
-                          <TrendIcon className="h-3 w-3" />
-                          {Math.abs(change)}%
-                        </span>
-                        <span>
-                          {t('common.vsYesterday')} <span className="tabular-nums">({formatCurrency(yesterday)})</span>
-                        </span>
-                      </>
-                    ) : (
-                      <span>{t('dashboard.noYesterday')}</span>
-                    )}
-                  </div>
-
-                  <dl className="mt-6 grid grid-cols-2 gap-4 border-t border-brand-100 pt-5 md:mt-auto dark:border-brand-800">
-                    <div>
-                      <dt className="text-xs text-brand-500 dark:text-brand-400">{t('dashboard.kpiTransactions')}</dt>
-                      <dd className="num mt-1 text-xl font-semibold">{data.today_count}</dd>
-                    </div>
-                    <div>
-                      <dt className="text-xs text-brand-500 dark:text-brand-400">{t('dashboard.avgBasket')}</dt>
-                      <dd className="num mt-1 text-xl font-semibold">{formatCurrency(averageBasket)}</dd>
-                    </div>
-                  </dl>
-                </div>
-
-                <div className="flex min-h-[180px] flex-col">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <p className="text-xs font-medium text-brand-500 dark:text-brand-400">{t('dashboard.last7Days')}</p>
-                    <p className="num text-xs font-semibold text-brand-700 dark:text-brand-200">{formatCurrency(weekTotal)}</p>
-                  </div>
-                  <div className="mt-2 min-h-0 flex-1">
-                    {hasWeekSales ? (
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={dayTotals} margin={{ top: 8, right: 0, left: 0, bottom: 0 }}>
-                          <XAxis dataKey="day" tick={chart.tick} axisLine={false} tickLine={false} interval={0} />
-                          <Tooltip
-                            cursor={{ fill: chart.cursor }}
-                            formatter={(value: number) => [formatCurrency(value), t('dashboard.salesLabel')]}
-                            {...chart.tooltip}
-                          />
-                          <Bar dataKey="total" radius={[5, 5, 2, 2]} maxBarSize={40}>
-                            {dayTotals.map((row, index) => (
-                              <Cell key={row.day} fill={index === dayTotals.length - 1 ? chart.highlight : chart.muted} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-brand-200 text-center text-xs text-brand-500 dark:border-brand-700">
-                        {noData}
-                      </div>
-                    )}
-                  </div>
-                </div>
+          {/* Today at a glance: one strip, the numbers an owner checks first */}
+          <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-brand-200 bg-white md:grid-cols-3 xl:grid-cols-5 dark:border-brand-800 dark:bg-brand-900">
+            <div className="col-span-2 border-b border-brand-200 p-5 md:col-span-1 md:border-e xl:border-b-0 dark:border-brand-800">
+              <p className="text-sm font-medium text-brand-500 dark:text-brand-400">{t('dashboard.kpiTodaySales')}</p>
+              <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2">
+                <span className="num text-[26px] font-semibold leading-tight">{formatCurrency(revenue)}</span>
+                {yesterday > 0 && (
+                  <span className={cn('inline-flex items-center gap-0.5 text-sm font-medium tabular-nums', change >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400')}>
+                    <TrendIcon className="h-3.5 w-3.5" />
+                    {Math.abs(change)}%
+                  </span>
+                )}
               </div>
-            </Card>
-
-            <div className="grid gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-1">
-              <KPICard
-                labelKey="dashboard.kpiLowStock"
-                value={String(attentionCount)}
-                change={0}
-                trend="neutral"
-                icon="alert"
-                attention={attentionCount > 0}
-                to={can('products.edit') ? '/inventory' : undefined}
-                hint={
-                  <span>
-                    {t('dashboard.stockSplit', { out: data.stock.out, low: data.stock.low })}
-                  </span>
-                }
-              />
-              <KPICard
-                labelKey="dashboard.kpiActiveCounters"
-                value={`${data.open_counters} / ${data.total_counters}`}
-                change={0}
-                trend="neutral"
-                icon="counter"
-                hint={
-                  <span className="flex items-center gap-1" aria-hidden>
-                    {Array.from({ length: data.total_counters }, (_, index) => (
-                      <span
-                        key={index}
-                        className={cn('h-1.5 w-5 rounded-full', index < data.open_counters ? 'bg-emerald-500' : 'bg-brand-200 dark:bg-brand-700')}
-                      />
-                    ))}
-                  </span>
-                }
-              />
+              <p className="mt-2 text-xs text-brand-400">
+                {yesterday > 0 ? <>{t('common.vsYesterday')} <span className="tabular-nums">{formatCurrency(yesterday)}</span></> : t('dashboard.noYesterday')}
+              </p>
             </div>
+            {[
+              { label: t('dashboard.kpiTransactions'), value: String(data.today_count), sub: t('dashboard.salesLabel') },
+              { label: t('dashboard.avgBasket'), value: formatCurrency(averageBasket), sub: `${t('dashboard.last7Days')} ${formatCurrency(weekTotal)}` },
+              {
+                label: t('dashboard.kpiLowStock'),
+                value: String(attentionCount),
+                sub: t('dashboard.stockSplit', { out: data.stock.out, low: data.stock.low }),
+                warn: attentionCount > 0,
+                to: can('products.edit') ? '/inventory' : undefined,
+              },
+              { label: t('dashboard.kpiActiveCounters'), value: `${data.open_counters} / ${data.total_counters}`, counters: true },
+            ].map((cell, index) => {
+              const content = (
+                <>
+                  <p className="text-sm font-medium text-brand-500 dark:text-brand-400">{cell.label}</p>
+                  <p className={cn('num mt-1.5 text-[26px] font-semibold leading-tight', cell.warn && 'text-amber-700 dark:text-amber-300')}>{cell.value}</p>
+                  {cell.counters ? (
+                    <span className="mt-3 flex items-center gap-1" aria-hidden>
+                      {Array.from({ length: data.total_counters }, (_, i) => (
+                        <span key={i} className={cn('h-1.5 w-5 rounded-full', i < data.open_counters ? 'bg-emerald-500' : 'bg-brand-200 dark:bg-brand-700')} />
+                      ))}
+                    </span>
+                  ) : (
+                    <p className="mt-2 truncate text-xs text-brand-400">{cell.sub}</p>
+                  )}
+                </>
+              );
+              const shell = cn(
+                'block p-5 dark:border-brand-800',
+                index < 3 && 'xl:border-e',
+                index % 2 === 0 && 'border-e md:border-e-0',
+                index < 2 && 'border-b md:border-b-0',
+                index === 0 && 'md:border-e',
+                index === 1 && 'md:border-e-0 xl:border-e',
+                index === 2 && 'md:border-b-0 md:border-e md:border-t xl:border-t-0',
+                index === 3 && 'md:border-t xl:border-t-0',
+              );
+              return cell.to ? (
+                <Link key={cell.label} to={cell.to} className={cn(shell, 'transition-colors hover:bg-brand-50 focus-ring dark:hover:bg-brand-800/40')}>{content}</Link>
+              ) : (
+                <div key={cell.label} className={shell}>{content}</div>
+              );
+            })}
           </div>
 
           {/* Week by counter + what sold */}

@@ -38,7 +38,7 @@ export default function ChangeFlash({ amount, invoiceNo, onDone }: ChangeFlashPr
       <div
         role="dialog"
         aria-live="assertive"
-        className="relative flex h-[min(92vh,40rem)] w-full max-w-5xl flex-col overflow-hidden rounded-[2rem] border-2 border-emerald-400/50 bg-brand-950 shadow-elevated sm:h-[min(88vh,44rem)]"
+        className="relative flex h-[min(92vh,40rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-emerald-400/40 bg-brand-950 shadow-elevated sm:h-[min(88vh,44rem)]"
       >
         <button
           type="button"
@@ -53,12 +53,12 @@ export default function ChangeFlash({ amount, invoiceNo, onDone }: ChangeFlashPr
           {invoiceNo && (
             <p dir="ltr" className="font-mono text-sm text-brand-400 sm:text-base">{invoiceNo}</p>
           )}
-          <p className="text-base font-bold uppercase tracking-[0.25em] text-emerald-400 sm:text-xl">
+          <p className="text-lg font-medium text-emerald-300 sm:text-2xl">
             {t('pos.changeDue')}
           </p>
           <p
             dir="ltr"
-            className="w-full max-w-full px-2 text-center font-display font-black leading-none tracking-tight text-emerald-400 tabular-nums"
+            className="w-full max-w-full px-2 text-center font-semibold leading-none tracking-tight text-emerald-400 tabular-nums"
             style={{ fontSize: 'clamp(2.75rem, 14vw, 8.5rem)' }}
             data-testid="change-flash"
           >

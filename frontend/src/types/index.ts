@@ -163,10 +163,26 @@ export interface Sale {
   payments: { method: PaymentMethod; amount: string; reference: string }[];
 }
 
+export interface DashboardRegister {
+  id: number;
+  name: string;
+  code: string;
+  status: 'open' | 'closed';
+  cashier: string;
+  sales_total: string;
+}
+
 export interface DashboardData {
   today_revenue: string;
   today_count: number;
   yesterday_revenue: string;
+  today_returns_count: number;
+  today_returns_amount: string;
+  customers_identified: number;
+  customers_walk_in: number;
+  khata_outstanding: string;
+  khata_customers: number;
+  registers: DashboardRegister[];
   open_counters: number;
   total_counters: number;
   stock: { out: number; low: number; ok: number };
@@ -175,7 +191,14 @@ export interface DashboardData {
   top_products: { name: string; units: string; revenue: string }[];
   payment_methods: { method: PaymentMethod; amount: string }[];
   peak_hours: { hour: number; count: number }[];
-  recent_activity: { id: number; action: string; target: string; user: string; created_at: string }[];
+  recent_activity: {
+    id: number;
+    action: string;
+    target: string;
+    user: string;
+    created_at: string;
+    details?: Record<string, unknown>;
+  }[];
   recent_shifts: (Shift & { difference: string })[];
 }
 
@@ -243,11 +266,44 @@ export interface FinancialReport {
   top_products: { name: string; units: string; revenue: string }[];
 }
 
+export interface CustomerAnalytics {
+  window_days: number;
+  identified_customers: number;
+  returning_rate: number;
+  avg_spend_per_customer: string;
+  at_risk_count: number;
+  visit_buckets: { label: string; count: number }[];
+  segments: { key: string; count: number; revenue: string }[];
+  heatmap: number[][];
+  peak: { weekday: string; hour: number; count: number };
+}
+
+export interface MoneyAnalytics {
+  window_days: number;
+  gross_sales: string;
+  returns: string;
+  net_sales: string;
+  cost_of_goods: string;
+  gross_profit: string;
+  gross_margin_percent: string | number;
+  expenses: string;
+  net_profit: string;
+  invoices: number;
+  avg_basket: string;
+  daily: { day: string; gross_sales: string; returns: string; net_sales: string; invoices: number }[];
+  payments: { method: string; amount: string }[];
+  top_products: { name: string; units: string; revenue: string }[];
+  heatmap: number[][];
+  peak: { weekday: string; hour: number; count: number };
+}
+
 export interface Insights {
+  money: MoneyAnalytics;
   reorder: { id: number; name: string; supplier: string; stock: string; daily_sales: string; days_left: string | null; order_quantity: string; order_cost: string }[];
   expiry: { id: number; name: string; quantity: string; expiry_date: string; days_left: number; value_at_cost: string; suggested_markdown: number | null }[];
   dead_stock: { id: number; name: string; stock: string; value_at_cost: string; last_sold: string | null }[];
   staff: { name: string; sales: string; invoices: number; discounts: string; returns: string; cleared_carts: number; cash_difference: string; flags: string[] }[];
+  customers?: CustomerAnalytics;
 }
 
 export interface GRNLine {

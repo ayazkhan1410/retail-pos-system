@@ -65,7 +65,7 @@ class KhataTests(TestCase):
         self.assertEqual(Decimal(data['balance']), 75)
         self.assertEqual(self.client.post('/api/customers/', {'name': 'X', 'phone': '0300'}, format='json').status_code, 400)
         self.assertEqual(self.client.post('/api/customers/', {'name': 'X', 'credit_limit': '-1'}, format='json').status_code, 400)
-        self.assertEqual(len(self.client.get('/api/customers/?search=ali').data), 1)
+        self.assertEqual(len(self.client.get('/api/customers/?search=ali').data['results']), 1)
         self.assertEqual(Category.objects.exists(), True)
 
     def test_cashier_can_look_up_but_not_edit_or_collect(self):

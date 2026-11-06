@@ -4,6 +4,7 @@ import threading
 import time
 from datetime import timedelta
 
+from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import close_old_connections
 from django.db.models import Q
@@ -20,9 +21,9 @@ POLL_SECONDS = 2
 HEARTBEAT_SECONDS = 15
 # Short-lived streams: clients reconnect; sync gunicorn workers are freed quickly.
 MAX_STREAM_SECONDS = 45
-# Hard cap per process. Prod uses 3 gthread workers x 4 threads = 12 slots;
-# keep well under that so reconnecting tabs cannot starve request workers.
-MAX_CONCURRENT_STREAMS = 3
+# Hard cap per process. Prod uses 3 gthread workers × 4 threads = 12 slots.
+# DEBUG is higher because React Strict Mode + Vite HMR briefly overlap streams.
+MAX_CONCURRENT_STREAMS = 12 if settings.DEBUG else 6
 _STREAM_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_STREAMS)
 
 

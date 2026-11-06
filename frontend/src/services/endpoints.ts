@@ -50,7 +50,10 @@ export const authApi = {
 };
 
 export const inventoryApi = {
-  products: () => api.get<ProductApi[]>('/inventory/products/'),
+  products: (opts?: { includeInactive?: boolean }) =>
+    api.get<ProductApi[]>('/inventory/products/', {
+      params: opts?.includeInactive ? { include_inactive: '1' } : undefined,
+    }),
   createProduct: (data: Record<string, unknown>) => api.post<ProductApi>('/inventory/products/', data),
   updateProduct: (id: string, data: Record<string, unknown>) => api.patch<ProductApi>(`/inventory/products/${id}/`, data),
   deleteProduct: (id: string) => api.delete(`/inventory/products/${id}/`),
@@ -133,7 +136,14 @@ export const suppliersApi = {
 };
 
 export const customersApi = {
-  list: (search?: string) => api.get<Customer[]>('/customers/', { params: { search: search || undefined } }),
+  list: (params?: { search?: string; page?: number; page_size?: number }) =>
+    api.get<{ count: number; next: string | null; previous: string | null; results: Customer[] }>('/customers/', {
+      params: {
+        search: params?.search || undefined,
+        page: params?.page,
+        page_size: params?.page_size,
+      },
+    }),
   create: (data: Record<string, unknown>) => api.post<Customer>('/customers/', data),
   update: (id: number, data: Record<string, unknown>) => api.patch<Customer>(`/customers/${id}/`, data),
   ledger: (id: number) => api.get<LedgerEntry[]>(`/customers/${id}/ledger/`),

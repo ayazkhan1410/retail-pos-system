@@ -159,7 +159,14 @@ def _post_sale(user, data):
         sold_at = min(data.get('sold_at') or now, now)
         Sale.objects.filter(pk=sale.pk).update(created_at=sold_at)
         sale.created_at = sold_at
-        log_event(user, 'offline_sale', sale.invoice_no, {'total': str(total), 'price_changes': price_changes})
+    # Every till sale lands in Recent Activity (walk-ins included). Offline stays flagged in details.
+    log_event(user, 'sale_completed', sale.invoice_no, {
+        'total': str(total),
+        'offline': offline,
+        'items': len(rows),
+        'terminal': terminal.name,
+        'price_changes': price_changes if offline else [],
+    })
     if data['discount']:
         log_event(user, 'sale_discount', sale.invoice_no, {'discount': str(data['discount']), 'total': str(total)})
     return sale

@@ -192,7 +192,9 @@ export default function POSPage() {
   }, [fetchProducts, syncCart]);
 
   useEffect(() => {
-    if (can('customers.view')) customersApi.list().then(({ data }) => setCustomers(data)).catch(() => undefined);
+    if (can('customers.view')) {
+      customersApi.list({ page_size: 200 }).then(({ data }) => setCustomers(data.results)).catch(() => undefined);
+    }
     void syncPending();
     const timer = window.setInterval(() => void syncPending(), SYNC_INTERVAL_MS);
     const onOnline = () => void syncPending();
@@ -215,14 +217,16 @@ export default function POSPage() {
     if (activeCounter) void refreshShift(activeCounter.id).catch(() => setNotice({ text: t('pos.catalogError'), kind: 'error' }));
   }, [activeCounter, refreshShift, t]);
 
+  const sellableProducts = useMemo(() => products.filter((p) => p.active), [products]);
+
   const categories = useMemo(
-    () => ['All', ...Array.from(new Set(products.map((p) => p.category))).sort()],
-    [products],
+    () => ['All', ...Array.from(new Set(sellableProducts.map((p) => p.category))).sort()],
+    [sellableProducts],
   );
 
   const filteredProducts = useMemo(() => {
     const q = productSearch.toLowerCase();
-    return products.filter((p) => {
+    return sellableProducts.filter((p) => {
       const matchCat = category === 'All' || p.category === category;
       const matchSearch =
         !q ||
@@ -230,7 +234,7 @@ export default function POSPage() {
         p.barcode.toLowerCase().includes(q);
       return matchCat && matchSearch && !isExpired(p);
     });
-  }, [category, productSearch, products]);
+  }, [category, productSearch, sellableProducts]);
 
   const flashScanOk = () => {
     setScanFlash(true);
@@ -266,7 +270,7 @@ export default function POSPage() {
       if (!q) return;
 
       const needle = q.toLowerCase();
-      const exact = products.find(
+      const exact = sellableProducts.find(
         (p) =>
           p.barcode.toLowerCase() === needle
           || (p.extraBarcodes ?? []).some((code) => code.toLowerCase() === needle),
@@ -278,7 +282,7 @@ export default function POSPage() {
       }
 
       // By name only: a half-read barcode must never add the wrong item by itself.
-      const byName = products.filter((p) => p.name.toLowerCase().includes(q.toLowerCase()));
+      const byName = sellableProducts.filter((p) => p.name.toLowerCase().includes(q.toLowerCase()));
       if (byName.length === 1) {
         addProduct(byName[0]);
         setMobilePane('bill');
@@ -291,7 +295,7 @@ export default function POSPage() {
       setProductSearch(q);
       setScannerInput('');
     },
-    [addProduct, products, setScannerInput, t],
+    [addProduct, sellableProducts, setScannerInput, t],
   );
 
   const handleScannerSubmit = (e: React.FormEvent) => {

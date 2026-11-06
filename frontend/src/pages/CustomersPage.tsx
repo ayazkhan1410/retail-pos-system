@@ -3,6 +3,7 @@ import { Plus, Search, Users, Pencil } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
 import { Badge, Button, Card, Input, Modal, EmptyState } from '@/components/ui';
 import LedgerPanel from '@/components/customers/LedgerPanel';
+import { useInfiniteScroll } from '@/hooks/useInfiniteScroll';
 import { apiErrorMessage } from '@/services';
 import { customersApi } from '@/services/endpoints';
 import { useCan, usePOSStore } from '@/store';
@@ -10,6 +11,7 @@ import { useTranslation } from '@/i18n';
 import { formatCurrency } from '@/utils';
 import type { Customer } from '@/types';
 
+const PAGE_SIZE = 40;
 const emptyForm = { name: '', phone: '', address: '', credit_limit: '0', opening_balance: '0' };
 
 export default function CustomersPage() {
@@ -17,7 +19,12 @@ export default function CustomersPage() {
   const can = useCan();
   const terminal = usePOSStore((state) => state.activeCounter?.id);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [viewing, setViewing] = useState<Customer | null>(null);
   const [editing, setEditing] = useState<Customer | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -25,14 +32,41 @@ export default function CustomersPage() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const load = useCallback(() => {
-    customersApi.list(search.trim()).then(({ data }) => setCustomers(data)).catch(() => setError(t('customers.loadError')));
-  }, [search, t]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  const load = useCallback(async (pageNumber: number, replace: boolean) => {
+    setLoading(true);
+    try {
+      const { data } = await customersApi.list({
+        search: debouncedSearch || undefined,
+        page: pageNumber,
+        page_size: PAGE_SIZE,
+      });
+      setCustomers((current) => (replace ? data.results : [...current, ...data.results]));
+      setTotalCount(data.count);
+      setPage(pageNumber);
+      setHasMore(Boolean(data.next));
+      setError('');
+    } catch {
+      setError(t('customers.loadError'));
+    } finally {
+      setLoading(false);
+    }
+  }, [debouncedSearch, t]);
 
   useEffect(() => {
-    const timer = window.setTimeout(load, 250);
-    return () => window.clearTimeout(timer);
+    void load(1, true);
   }, [load]);
+
+  const loadMore = useCallback(() => {
+    if (!hasMore || loading) return;
+    return load(page + 1, false);
+  }, [hasMore, loading, load, page]);
+
+  const sentinelRef = useInfiniteScroll(hasMore && !loading, loadMore);
 
   const show = (customer: Customer | null) => {
     setEditing(customer);
@@ -51,7 +85,7 @@ export default function CustomersPage() {
       if (editing) await customersApi.update(editing.id, form);
       else await customersApi.create(form);
       setFormOpen(false);
-      load();
+      await load(1, true);
     } catch (err) {
       setError(apiErrorMessage(err, t('customers.saveError')));
     } finally {
@@ -65,7 +99,7 @@ export default function CustomersPage() {
     <>
       <Header
         title={t('customers.title')}
-        subtitle={t('customers.subtitle', { count: customers.length, owed: formatCurrency(owed) })}
+        subtitle={t('customers.subtitle', { count: totalCount || customers.length, owed: formatCurrency(owed) })}
         actions={can('customers.edit') && (
           <Button variant="accent" size="sm" onClick={() => show(null)}><Plus className="h-4 w-4" /> {t('customers.add')}</Button>
         )}
@@ -78,7 +112,7 @@ export default function CustomersPage() {
               <Input aria-label={t('customers.search')} placeholder={t('customers.search')} value={search} onChange={(e) => setSearch(e.target.value)} icon={<Search className="h-4 w-4" />} />
             </div>
           </div>
-          {customers.length === 0 && <EmptyState icon={Users} title={t('customers.empty')} description={search ? undefined : t('customers.emptyHint')} />}
+          {customers.length === 0 && !loading && <EmptyState icon={Users} title={t('customers.empty')} description={debouncedSearch ? undefined : t('customers.emptyHint')} />}
           <div className="divide-y divide-brand-100 dark:divide-brand-800">
             {customers.map((customer) => (
               <div key={customer.id} className="flex items-center gap-3 px-4 py-3">
@@ -96,6 +130,8 @@ export default function CustomersPage() {
               </div>
             ))}
           </div>
+          <div ref={sentinelRef} className="h-8" aria-hidden />
+          {loading && <p className="px-4 py-3 text-center text-xs text-brand-400">{t('common.loading')}</p>}
         </Card>
       </main>
 
@@ -134,7 +170,7 @@ export default function CustomersPage() {
               pay={async (data) => {
                 const { data: updated } = await customersApi.collect(viewing.id, { ...data, terminal: terminal ?? null });
                 setViewing(updated);
-                load();
+                await load(1, true);
               }}
             />
           </div>

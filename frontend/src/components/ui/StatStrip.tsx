@@ -26,7 +26,7 @@ export default function StatStrip({ items, className }: { items: StatItem[]; cla
       className={cn(
         'grid overflow-hidden rounded-xl border border-brand-200 bg-white dark:border-brand-800 dark:bg-brand-900',
         'grid-cols-2 gap-px bg-brand-200 dark:bg-brand-800',
-        items.length >= 5 ? 'lg:grid-cols-5' : items.length === 4 ? 'lg:grid-cols-4' : 'sm:grid-cols-3',
+        items.length >= 6 ? 'lg:grid-cols-6' : items.length >= 5 ? 'lg:grid-cols-5' : items.length === 4 ? 'lg:grid-cols-4' : 'sm:grid-cols-3',
         className,
       )}
     >

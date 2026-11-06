@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import Q
 from rest_framework import generics, serializers, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -10,6 +11,12 @@ from audit.models import log_event
 from auth.permissions import requires
 from customers.models import Customer, CustomerLedgerEntry, post_customer_entry
 from sales.models import Shift, Terminal
+
+
+class CustomerPagination(PageNumberPagination):
+    page_size = 40
+    page_size_query_param = 'page_size'
+    max_page_size = 200
 
 
 class CustomerSerializer(serializers.ModelSerializer):
@@ -49,14 +56,14 @@ class LedgerSerializer(serializers.ModelSerializer):
 class CustomerListCreateView(generics.ListCreateAPIView):
     permission_classes = [requires('customers.view', 'customers.edit')]
     serializer_class = CustomerSerializer
-    pagination_class = None
+    pagination_class = CustomerPagination
 
     def get_queryset(self):
-        queryset = Customer.objects.filter(active=True)
+        queryset = Customer.objects.filter(active=True).order_by('name')
         search = self.request.query_params.get('search')
         if search:
             queryset = queryset.filter(Q(name__icontains=search) | Q(phone__icontains=search))
-        return queryset[:200]
+        return queryset
 
 
 class CustomerDetailView(generics.RetrieveUpdateAPIView):

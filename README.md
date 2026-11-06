@@ -1,58 +1,99 @@
-# SmartShop POS
+# Tijori POS
 
-Point of sale for Pakistani retail: Django + PostgreSQL backend, React frontend, English and Urdu.
+Single-shop barcode point of sale for Pakistani retail (Rs). Django + PostgreSQL API, React till UI, English / Urdu.
 
-## Run it for development
+## Features
+
+- **POS** — barcode scan, cash / JazzCash / Easypaisa / Raast / card / khata (payment method labels only), shifts, receipts, offline sync
+- **Inventory** — products, extra barcodes, sale rate, stock, low-stock & expiry alerts
+- **Purchases** — GRN post/void, purchase returns
+- **Sales** — history, invoice returns, walk-in returns
+- **Customers / suppliers** — khata ledgers and payments
+- **Staff** — roles & permissions, PIN switch on till
+- **Reports / insights** — sales, stock, expenses
+- **Backup** — SQL dump from Settings or `infra/scripts/backup.sh`
+
+## Quick start
 
 ```sh
 cp .env.example .env
 cp frontend/.env.example frontend/.env
 docker compose up -d --build --wait
+```
+
+Open http://localhost:3000 · API http://localhost:8000
+
+**Fresh demo data**
+
+```sh
 docker compose exec backend python manage.py seed_demo
 ```
 
-`seed_demo` prints the demo login password. Open http://localhost:3000.
-
-| Account | Sees |
-|---|---|
-| `admin@smartshop.local` | Superuser, also opens Django admin |
-| `owner@smartshop.local` | Everything, including staff and role permissions |
-| `manager@smartshop.local` | Everything except staff management |
-| `cashier@smartshop.local`, `cashier2@smartshop.local` | POS only |
-| `stock@smartshop.local` | Products, stock, purchases |
-| `accounts@smartshop.local` | Reports, expenses, payments |
-
-For a client demo, `python manage.py seed_demo --history 30` also creates 30 days of made-up sales. Never run that on a real shop's database.
-
-## Run it in a shop
-
-1. In `.env`, set a real `DJANGO_SECRET_KEY` and `POSTGRES_PASSWORD`. The app refuses to start with the placeholder key.
-2. Add the server's LAN address to `DJANGO_ALLOWED_HOSTS` and, as `http://<address>:3000`, to `CORS_ALLOWED_ORIGINS`.
-3. Start it and create the owner account:
+**Restore an existing dump** (replaces DB data)
 
 ```sh
-docker compose -f docker-compose.prod.yml up -d --build --wait
-docker compose -f docker-compose.prod.yml exec backend python manage.py createsuperuser
+docker compose exec -T db psql -U smartshop -d smartshop -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public;"
+# PowerShell:  cmd /c "type backups\your-dump.sql | docker compose exec -T db psql -U smartshop -d smartshop -v ON_ERROR_STOP=1"
+# bash:        docker compose exec -T db psql -U smartshop -d smartshop -v ON_ERROR_STOP=1 < backups/your-dump.sql
 ```
 
-Counters then open `http://<server-address>:3000`. Add cashiers under Settings > Staff.
+### Demo logins (after seed / handoff dump)
+
+| Email | Role |
+|---|---|
+| `admin@smartshop.local` | Owner + Django admin |
+| `owner@smartshop.local` | Full shop access |
+| `manager@smartshop.local` | All except staff admin |
+| `cashier@smartshop.local` | POS only |
+| `stock@smartshop.local` | Products / purchases |
+| `accounts@smartshop.local` | Reports / expenses |
+
+Password is printed by `seed_demo`, or whatever you set after restore.
+
+## Shop deploy (short)
+
+1. Set strong `DJANGO_SECRET_KEY` and `POSTGRES_PASSWORD` in `.env` (`DJANGO_DEBUG=False` via prod compose).
+2. Add LAN IP to `DJANGO_ALLOWED_HOSTS` and `CORS_ALLOWED_ORIGINS`.
+3. `docker compose -f docker-compose.prod.yml up -d --build --wait`
+4. `createsuperuser`, then add cashiers under Settings → Staff.
+
+## Database diagram
+
+```mermaid
+erDiagram
+  CustomUser ||--o{ Sale : cashiers
+  CustomUser ||--o{ Shift : opens
+  Branch ||--|{ Terminal : has
+  Terminal ||--o{ Shift : runs
+  Shift ||--o{ Sale : contains
+  Customer ||--o{ Sale : optional
+  Sale ||--|{ SaleLine : has
+  Sale ||--|{ Payment : has
+  Product ||--o{ SaleLine : sold_as
+  Category ||--|{ Product : groups
+  Supplier ||--o{ Product : supplies
+  Branch ||--|{ StockLevel : tracks
+  Product ||--|{ StockLevel : qty
+  Supplier ||--o{ GRN : delivers
+  GRN ||--|{ GRNLine : lines
+  Product ||--o{ GRNLine : received
+  Sale ||--o{ SaleReturn : returns
+  Customer ||--o{ CustomerLedgerEntry : khata
+  Supplier ||--o{ SupplierLedgerEntry : payables
+```
 
 ## Tests
 
 ```sh
-cd backend && python manage.py test   # concurrency tests only run on PostgreSQL
+docker compose exec backend python manage.py test
 cd frontend && npm run lint && npm run build
-cd e2e && npm install && BASE=http://localhost:3000 PASSWORD=<seed password> node smoke.mjs   # needs a freshly seeded database
 ```
 
-## Backups
+## Stack
 
-`infra/scripts/backup.sh` dumps the database into `backups/`. Settings > Backup Database does the same from the app.
-
-Off-site (required for a real shop): set `BACKUP_OFFSITE_DIR` to a USB/NAS path, or `BACKUP_OFFSITE_CMD` to a command that uploads `{{file}}` (rclone/scp/S3). A backup that stays on the same disk will not survive that disk failing.
-
-To restore one into an empty database:
-
-```sh
-docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1' < backups/smartshop-YYYYMMDD-HHMMSS.sql
-```
+| Layer | Tech |
+|---|---|
+| Backend | Django 5 + DRF, session auth |
+| DB | PostgreSQL 16 |
+| Frontend | React + Vite + TypeScript + Tailwind |
+| Run | Docker Compose (`:3000` UI, `:8000` API, `:5433` DB) |

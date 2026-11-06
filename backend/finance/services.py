@@ -2,8 +2,8 @@ import math
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, Sum
-from django.db.models.functions import Coalesce
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, Max, Min, Sum
+from django.db.models.functions import Coalesce, ExtractHour, ExtractWeekDay, TruncDate
 from django.utils import timezone
 
 from audit.models import AuditLog
@@ -183,12 +183,194 @@ def _staff_review(today):
     return sorted(rows, key=lambda row: -len(row['flags']))
 
 
+def _heatmap_and_peak(queryset):
+    """Weekday × hour counts for any sale queryset (Mon=0 … Sun=6)."""
+    heat_rows = (
+        queryset.annotate(weekday=ExtractWeekDay('created_at'), hour=ExtractHour('created_at'))
+        .values('weekday', 'hour')
+        .annotate(count=Count('id'))
+    )
+    heatmap = [[0 for _ in range(24)] for _ in range(7)]
+    for row in heat_rows:
+        wd = (int(row['weekday']) - 2) % 7
+        heatmap[wd][int(row['hour'])] = row['count']
+    peak = max(
+        ((day, hour, heatmap[day][hour]) for day in range(7) for hour in range(24)),
+        key=lambda item: item[2],
+        default=(0, 0, 0),
+    )
+    weekday_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    return heatmap, {
+        'weekday': weekday_names[peak[0]],
+        'hour': peak[1],
+        'count': peak[2],
+    }
+
+
+def _money_analytics(today, days=30):
+    """Shop money picture from every bill — no customer names required."""
+    start = today - timedelta(days=days - 1)
+    sales = Sale.objects.filter(created_at__date__gte=start, created_at__date__lte=today)
+    returns = SaleReturn.objects.filter(created_at__date__gte=start, created_at__date__lte=today)
+    lines = SaleLine.objects.filter(sale__in=sales)
+    returned_lines = ReturnLine.objects.filter(sale_return__in=returns, restocked=True).annotate(
+        cost=ExpressionWrapper(F('sale_line__unit_cost') * F('quantity'), output_field=MONEY),
+    )
+    expenses = Expense.objects.filter(date__gte=start, date__lte=today)
+
+    sales_daily = {
+        row['day']: row
+        for row in sales.annotate(day=TruncDate('created_at')).values('day').annotate(
+            gross=Coalesce(Sum('total'), ZERO, output_field=MONEY),
+            invoices=Count('id'),
+        )
+    }
+    returns_daily = {
+        row['day']: row['amount']
+        for row in returns.annotate(day=TruncDate('created_at')).values('day').annotate(
+            amount=Coalesce(Sum('total'), ZERO, output_field=MONEY),
+        )
+    }
+
+    daily = []
+    cursor = start
+    while cursor <= today:
+        row = sales_daily.get(cursor)
+        gross = row['gross'] if row else ZERO
+        invoices = row['invoices'] if row else 0
+        returned = returns_daily.get(cursor, ZERO)
+        daily.append({
+            'day': cursor.isoformat(),
+            'gross_sales': gross,
+            'returns': returned,
+            'net_sales': gross - returned,
+            'invoices': invoices,
+        })
+        cursor += timedelta(days=1)
+
+    gross_sales = _sum(sales, 'total')
+    returned_total = _sum(returns, 'total')
+    net_sales = gross_sales - returned_total
+    cost_of_goods = _cost_of(lines) - _sum(returned_lines, 'cost')
+    gross_profit = net_sales - cost_of_goods
+    total_expenses = _sum(expenses, 'amount')
+    invoice_count = sales.count()
+    heatmap, peak = _heatmap_and_peak(sales)
+
+    return {
+        'window_days': days,
+        'gross_sales': gross_sales,
+        'returns': returned_total,
+        'net_sales': net_sales,
+        'cost_of_goods': cost_of_goods,
+        'gross_profit': gross_profit,
+        'gross_margin_percent': round(gross_profit / net_sales * 100, 1) if net_sales else 0,
+        'expenses': total_expenses,
+        'net_profit': gross_profit - total_expenses,
+        'invoices': invoice_count,
+        'avg_basket': (net_sales / invoice_count) if invoice_count else ZERO,
+        'daily': daily,
+        'payments': list(
+            Payment.objects.filter(sale__in=sales).values('method').annotate(amount=Sum('amount')).order_by('-amount')
+        ),
+        'top_products': list(
+            lines.values('name').annotate(units=Sum('quantity'), revenue=Sum('line_total')).order_by('-revenue')[:8]
+        ),
+        'heatmap': heatmap,
+        'peak': peak,
+    }
+
+
+def _customer_analytics(today, days=90):
+    """Customer visit patterns from identified (named) sales — no geography fields."""
+    start = today - timedelta(days=days - 1)
+    window = Sale.objects.filter(created_at__date__gte=start, created_at__date__lte=today)
+    identified = window.exclude(customer_id=None)
+    by_customer = list(
+        identified.values('customer_id')
+        .annotate(
+            visits=Count('id'),
+            spend=Coalesce(Sum('total'), ZERO, output_field=MONEY),
+            first_sale=Min('created_at__date'),
+            last_sale=Max('created_at__date'),
+            name=Max('customer__name'),
+        )
+    )
+    identified_count = len(by_customer)
+    returning = [row for row in by_customer if row['visits'] >= 2]
+    returning_rate = round((len(returning) / identified_count) * 100, 1) if identified_count else 0
+    total_spend = sum((row['spend'] for row in by_customer), ZERO)
+    avg_spend = (total_spend / identified_count) if identified_count else ZERO
+
+    buckets = {'1': 0, '2-3': 0, '4-8': 0, '9-15': 0, '16+': 0}
+    loyal, regular, new, at_risk = [], [], [], []
+    for row in by_customer:
+        visits = row['visits']
+        if visits == 1:
+            buckets['1'] += 1
+        elif visits <= 3:
+            buckets['2-3'] += 1
+        elif visits <= 8:
+            buckets['4-8'] += 1
+        elif visits <= 15:
+            buckets['9-15'] += 1
+        else:
+            buckets['16+'] += 1
+
+        days_since = (today - row['last_sale']).days
+        days_span = max(1, (row['last_sale'] - row['first_sale']).days)
+        rate_per_month = visits / (days_span / 30)
+        segment = {
+            'id': row['customer_id'],
+            'name': row['name'] or '',
+            'visits': visits,
+            'spend': row['spend'],
+            'last_sale': row['last_sale'].isoformat(),
+        }
+        if days_since >= 30 and visits >= 1:
+            at_risk.append(segment)
+        elif row['first_sale'] >= today - timedelta(days=30) and visits <= 2:
+            new.append(segment)
+        elif rate_per_month >= 4 or visits >= 12:
+            loyal.append(segment)
+        else:
+            regular.append(segment)
+
+    heatmap, peak = _heatmap_and_peak(window)
+
+    def _seg_summary(rows, label):
+        return {
+            'key': label,
+            'count': len(rows),
+            'revenue': sum((row['spend'] for row in rows), ZERO),
+        }
+
+    return {
+        'window_days': days,
+        'identified_customers': identified_count,
+        'returning_rate': returning_rate,
+        'avg_spend_per_customer': avg_spend,
+        'at_risk_count': len(at_risk),
+        'visit_buckets': [{'label': key, 'count': value} for key, value in buckets.items()],
+        'segments': [
+            _seg_summary(loyal, 'loyal'),
+            _seg_summary(regular, 'regular'),
+            _seg_summary(new, 'new'),
+            _seg_summary(at_risk, 'at_risk'),
+        ],
+        'heatmap': heatmap,
+        'peak': peak,
+    }
+
+
 def insights():
     today = timezone.localdate()
     on_hand = dict(StockLevel.objects.filter(branch=default_branch()).values_list('product_id', 'quantity'))
     return {
+        'money': _money_analytics(today),
         'reorder': _reorder_list(today, on_hand),
         'expiry': _expiry_alerts(today),
         'dead_stock': _dead_stock(today, on_hand),
         'staff': _staff_review(today),
+        'customers': _customer_analytics(today),
     }

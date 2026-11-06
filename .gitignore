@@ -197,3 +197,4 @@ frontend/.vite/
 # E2E and demo tooling
 e2e/node_modules/
 e2e/package-lock.json
+demo-output/

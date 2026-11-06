@@ -19,6 +19,8 @@ import {
   Sun,
   CheckCircle2,
   PackageSearch,
+  Pause,
+  Play,
   ReceiptText,
   LayoutGrid,
   SplitSquareHorizontal,
@@ -30,7 +32,8 @@ import { formatCurrency, cn, newUuid } from '@/utils';
 import { getExpiryStatus } from '@/utils/inventoryUtils';
 import { printReceipt } from '@/utils/receiptPrint';
 import { apiErrorMessage } from '@/services';
-import { auditApi, customersApi, salesApi } from '@/services/endpoints';
+import { auditApi, customersApi, inventoryApi, salesApi, type HeldBill } from '@/services/endpoints';
+import { mapProductFromApi } from '@/services/products';
 import CashQuickModal from '@/components/pos/CashQuickModal';
 import ChangeFlash from '@/components/pos/ChangeFlash';
 import PaymentModal, { type PaymentResult } from '@/components/pos/PaymentModal';
@@ -120,6 +123,7 @@ export default function POSPage() {
     updateQuantity,
     removeFromCart,
     clearCart,
+    replaceCart,
     syncCart,
     pendingSales,
     queueSale,
@@ -147,6 +151,10 @@ export default function POSPage() {
   const [changeFlash, setChangeFlash] = useState<{ amount: number; invoiceNo: string } | null>(null);
   const [category, setCategory] = useState('All');
   const [productSearch, setProductSearch] = useState('');
+  const [searchHits, setSearchHits] = useState<Product[] | null>(null);
+  const [heldBills, setHeldBills] = useState<HeldBill[]>([]);
+  const [holdsOpen, setHoldsOpen] = useState(false);
+  const [holdBusy, setHoldBusy] = useState(false);
   const [scanFlash, setScanFlash] = useState(false);
   const [notice, setNotice] = useState<{ text: string; kind: 'warning' | 'error' } | null>(null);
   const [pinSwitchOpen, setPinSwitchOpen] = useState(false);
@@ -226,17 +234,119 @@ export default function POSPage() {
     [sellableProducts],
   );
 
+  useEffect(() => {
+    const q = productSearch.trim();
+    if (q.length < 2) {
+      setSearchHits(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void inventoryApi
+        .searchProducts(q, { limit: 48 })
+        .then(({ data }) => {
+          if (!cancelled) setSearchHits(data.results.map(mapProductFromApi).filter((p) => !isExpired(p)));
+        })
+        .catch(() => {
+          if (!cancelled) setSearchHits([]);
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [productSearch]);
+
   const filteredProducts = useMemo(() => {
-    const q = productSearch.toLowerCase();
-    return sellableProducts.filter((p) => {
-      const matchCat = category === 'All' || p.category === category;
-      const matchSearch =
-        !q ||
-        p.name.toLowerCase().includes(q) ||
-        p.barcode.toLowerCase().includes(q);
-      return matchCat && matchSearch && !isExpired(p);
-    });
-  }, [category, productSearch, sellableProducts]);
+    const base = (searchHits ?? sellableProducts).filter((p) => !isExpired(p));
+    if (category === 'All') return base;
+    return base.filter((p) => p.category === category);
+  }, [category, searchHits, sellableProducts]);
+
+  const refreshHolds = useCallback(async () => {
+    if (!activeCounter) {
+      setHeldBills([]);
+      return;
+    }
+    try {
+      const { data } = await salesApi.heldBills(activeCounter.id);
+      setHeldBills(data);
+    } catch {
+      setHeldBills([]);
+    }
+  }, [activeCounter]);
+
+  useEffect(() => {
+    void refreshHolds();
+  }, [refreshHolds]);
+
+  const holdCurrentBill = async () => {
+    if (!activeCounter || cart.length === 0 || holdBusy) return;
+    setHoldBusy(true);
+    try {
+      await salesApi.holdBill({
+        terminal: activeCounter.id,
+        label: t('pos.heldBillDefault', { count: heldBills.length + 1 }),
+        lines: cart.map((item) => ({
+          product_id: Number(item.product.id),
+          quantity: String(item.quantity),
+          name: item.product.name,
+          barcode: item.product.barcode,
+          unit_price: item.product.salePrice.toFixed(2),
+        })),
+      });
+      clearCart();
+      await refreshHolds();
+      toast(t('pos.billHeld'));
+      focusScanner();
+    } catch (err) {
+      setNotice({ text: apiErrorMessage(err, t('pos.holdFailed')), kind: 'error' });
+    } finally {
+      setHoldBusy(false);
+    }
+  };
+
+  const recallHeldBill = async (bill: HeldBill) => {
+    if (holdBusy) return;
+    if (cart.length > 0) {
+      const ok = await confirmAction({
+        title: t('pos.recallReplaceTitle'),
+        body: t('pos.recallReplaceBody'),
+        confirmLabel: t('pos.recallBill'),
+      });
+      if (!ok) return;
+    }
+    setHoldBusy(true);
+    try {
+      const items: CartItem[] = bill.lines.map((line) => {
+        const existing = products.find((product) => Number(product.id) === line.product_id);
+        const product = existing ?? {
+          id: String(line.product_id),
+          active: true,
+          name: line.name,
+          barcode: line.barcode,
+          sku: line.barcode,
+          price: Number(line.unit_price),
+          salePrice: Number(line.unit_price),
+          cost: 0,
+          stock: 0,
+          category: '',
+          status: 'in_stock' as const,
+        };
+        return { product, quantity: Number(line.quantity) };
+      });
+      replaceCart(items);
+      await salesApi.deleteHeldBill(bill.id);
+      setHoldsOpen(false);
+      await refreshHolds();
+      setMobilePane('bill');
+      focusScanner();
+    } catch (err) {
+      setNotice({ text: apiErrorMessage(err, t('pos.recallFailed')), kind: 'error' });
+    } finally {
+      setHoldBusy(false);
+    }
+  };
 
   const flashScanOk = () => {
     setScanFlash(true);
@@ -753,16 +863,40 @@ export default function POSPage() {
               {t('pos.currentBill')}
               <span className="ms-2 text-sm font-normal text-brand-500"><span className="tabular-nums">{itemCount}</span> {t('common.items')}</span>
             </h2>
-            {!empty && (
+            <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => void handleClearCart()}
-                aria-keyshortcuts="Control+F4"
-                className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-brand-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                onClick={() => {
+                  void refreshHolds();
+                  setHoldsOpen(true);
+                }}
+                className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-100 dark:text-brand-300 dark:hover:bg-brand-800"
               >
-                <Trash2 className="h-3.5 w-3.5" /> {t('pos.clearAll')}
+                <Play className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">{t('pos.heldBills')}</span>
+                {heldBills.length > 0 && <span className="tabular-nums">({heldBills.length})</span>}
               </button>
-            )}
+              {!empty && (
+                <>
+                  <button
+                    type="button"
+                    disabled={holdBusy || !tillReady}
+                    onClick={() => void holdCurrentBill()}
+                    className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-100 disabled:opacity-45 dark:text-brand-300 dark:hover:bg-brand-800"
+                  >
+                    <Pause className="h-3.5 w-3.5" /> {t('pos.holdBill')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleClearCart()}
+                    aria-keyshortcuts="Control+F4"
+                    className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-brand-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> {t('pos.clearAll')}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           <div ref={billListRef} className="min-h-0 flex-1 overflow-y-auto">
@@ -979,6 +1113,35 @@ export default function POSPage() {
             }}
           />
         )}
+
+        <Modal
+          open={holdsOpen}
+          onClose={() => setHoldsOpen(false)}
+          title={t('pos.heldBills')}
+          size="md"
+          footer={<Button variant="outline" onClick={() => setHoldsOpen(false)}>{t('common.close')}</Button>}
+        >
+          {heldBills.length === 0 ? (
+            <EmptyState title={t('pos.noHeldBills')} compact />
+          ) : (
+            <ul className="divide-y divide-brand-100 dark:divide-brand-800">
+              {heldBills.map((bill) => (
+                <li key={bill.id} className="flex items-center justify-between gap-3 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{bill.label || t('pos.heldBill')}</p>
+                    <p className="text-xs text-brand-500">
+                      {bill.item_count} {t('common.items')} · {formatCurrency(Number(bill.subtotal))}
+                      {bill.held_by_name ? ` · ${bill.held_by_name}` : ''}
+                    </p>
+                  </div>
+                  <Button variant="accent" size="sm" loading={holdBusy} onClick={() => void recallHeldBill(bill)}>
+                    {t('pos.recallBill')}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Modal>
       </div>
     </div>
   );

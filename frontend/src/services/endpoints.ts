@@ -54,6 +54,14 @@ export const inventoryApi = {
     api.get<ProductApi[]>('/inventory/products/', {
       params: opts?.includeInactive ? { include_inactive: '1' } : undefined,
     }),
+  searchProducts: (q: string, opts?: { includeInactive?: boolean; limit?: number }) =>
+    api.get<{ results: ProductApi[]; count: number }>('/inventory/products/search/', {
+      params: {
+        q,
+        limit: opts?.limit ?? 40,
+        ...(opts?.includeInactive ? { include_inactive: '1' } : {}),
+      },
+    }),
   createProduct: (data: Record<string, unknown>) => api.post<ProductApi>('/inventory/products/', data),
   updateProduct: (id: string, data: Record<string, unknown>) => api.patch<ProductApi>(`/inventory/products/${id}/`, data),
   deleteProduct: (id: string) => api.delete(`/inventory/products/${id}/`),
@@ -70,6 +78,50 @@ export const inventoryApi = {
   categories: () => api.get<string[]>('/inventory/categories/'),
   branch: () => api.get<Branch>('/inventory/branch/'),
   updateBranch: (data: Partial<Branch>) => api.patch<Branch>('/inventory/branch/', data),
+};
+
+export type HeldBillLine = {
+  product_id: number;
+  quantity: string;
+  name: string;
+  barcode: string;
+  unit_price: string;
+};
+
+export type HeldBill = {
+  id: number;
+  terminal: number;
+  terminal_name: string;
+  held_by: number;
+  held_by_name: string;
+  label: string;
+  customer: number | null;
+  customer_name: string;
+  discount: string;
+  lines: HeldBillLine[];
+  item_count: number;
+  subtotal: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ZReport = {
+  shift_id: number;
+  terminal: string;
+  opened_at: string;
+  closed_at: string | null;
+  opened_by: string;
+  opening_cash: string;
+  expected_cash: string;
+  counted_cash: string | null;
+  difference: string | null;
+  sales_count: number;
+  sales_total: string;
+  returns_count: number;
+  returns_total: string;
+  net_sales: string;
+  payments: Record<string, string>;
+  invoices: { invoice_no: string; total: string; cashier: string; created_at: string }[];
 };
 
 export interface NewSale {
@@ -112,6 +164,16 @@ export const salesApi = {
     api.post<Shift>('/sales/shifts/', { terminal, opening_cash: openingCash }),
   closeShift: (shiftId: number, countedCash: string) =>
     api.post<Shift>(`/sales/shifts/${shiftId}/close/`, { counted_cash: countedCash }),
+  zReport: (shiftId: number) => api.get<ZReport>(`/sales/shifts/${shiftId}/z-report/`),
+  heldBills: (terminalId: number) => api.get<HeldBill[]>('/sales/held/', { params: { terminal: terminalId } }),
+  holdBill: (data: {
+    terminal: number;
+    label?: string;
+    customer?: number | null;
+    discount?: string;
+    lines: HeldBillLine[];
+  }) => api.post<HeldBill>('/sales/held/', data),
+  deleteHeldBill: (id: number) => api.delete(`/sales/held/${id}/`),
   dashboard: () => api.get<DashboardData>('/sales/dashboard/'),
 };
 

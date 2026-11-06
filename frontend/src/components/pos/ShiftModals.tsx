@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Modal, Button, Input } from '@/components/ui';
-import { apiErrorMessage } from '@/services';
+import { apiErrorMessage, inventoryApi, salesApi } from '@/services';
 import { useTranslation } from '@/i18n';
-import { Lock, Unlock } from 'lucide-react';
+import { Lock, Printer, Unlock } from 'lucide-react';
 import { cn, formatCurrency } from '@/utils';
+import { printZReport } from '@/utils/zReportPrint';
 import type { Shift } from '@/types';
 
 interface CashFormProps {
@@ -128,11 +129,41 @@ export function CloseShiftModal({ onClose, onSubmit }: { onClose: () => void; on
 
 export function ShiftSummaryModal({ shift, onClose }: { shift: Shift; onClose: () => void }) {
   const { t } = useTranslation();
+  const [printing, setPrinting] = useState(false);
   const expected = Number(shift.expected_cash);
   const counted = Number(shift.counted_cash);
   const difference = Math.round((counted - expected) * 100) / 100;
+
+  const printReport = async () => {
+    setPrinting(true);
+    try {
+      const [{ data: report }, { data: branch }] = await Promise.all([
+        salesApi.zReport(shift.id),
+        inventoryApi.branch().catch(() => ({ data: { name: 'Tijori POS' } })),
+      ]);
+      printZReport(report, branch.name || 'Tijori POS');
+    } catch {
+      // Keep the summary visible even if print payload fails.
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   return (
-    <Modal open onClose={onClose} title={t('pos.shiftClosed')} size="sm" footer={<Button variant="accent" onClick={onClose}>{t('common.close')}</Button>}>
+    <Modal
+      open
+      onClose={onClose}
+      title={t('pos.shiftClosed')}
+      size="sm"
+      footer={
+        <>
+          <Button variant="outline" loading={printing} onClick={() => void printReport()}>
+            <Printer className="me-1.5 h-4 w-4" /> {t('pos.printZReport')}
+          </Button>
+          <Button variant="accent" onClick={onClose}>{t('common.close')}</Button>
+        </>
+      }
+    >
       <dl className="space-y-2.5 text-sm">
         {[
           [t('pos.shiftSales'), `${formatCurrency(Number(shift.sales_total))} · ${t('dashboard.salesCount', { count: shift.sales_count })}`],

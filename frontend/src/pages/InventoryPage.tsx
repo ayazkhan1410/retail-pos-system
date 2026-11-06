@@ -21,6 +21,7 @@ import {
 import ProductForm, { type ProductFormSubmitResult } from '@/components/inventory/ProductForm';
 import LabelPrintModal from '@/components/inventory/LabelPrintModal';
 import { apiErrorMessage, inventoryApi } from '@/services';
+import { mapProductFromApi } from '@/services/products';
 import { useCan, useInventoryStore } from '@/store';
 import { useTranslation } from '@/i18n';
 import type { Product } from '@/types';
@@ -72,8 +73,37 @@ export default function InventoryPage() {
   const [labelProduct, setLabelProduct] = useState<Product | null>(null);
   const [labelModalOpen, setLabelModalOpen] = useState(false);
 
+  const [searchHits, setSearchHits] = useState<Product[] | null>(null);
+
+  useEffect(() => {
+    const q = filters.search.trim();
+    if (q.length < 2) {
+      setSearchHits(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void inventoryApi
+        .searchProducts(q, { includeInactive: true, limit: 100 })
+        .then(({ data }) => {
+          if (!cancelled) setSearchHits(data.results.map(mapProductFromApi));
+        })
+        .catch(() => {
+          if (!cancelled) setSearchHits(null);
+        });
+    }, 220);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [filters.search]);
+
   const stats = useMemo(() => countByStockStatus(products), [products]);
-  const filtered = useMemo(() => filterProducts(products, filters), [products, filters]);
+  const filtered = useMemo(() => {
+    const source = searchHits ?? products;
+    // Elasticsearch already ranked by text; keep stock/category/expiry filters client-side.
+    return filterProducts(source, searchHits ? { ...filters, search: '' } : filters);
+  }, [filters, products, searchHits]);
   const ROW_CHUNK = 50;
   const [visibleRows, setVisibleRows] = useState(ROW_CHUNK);
   useEffect(() => {

@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Plus, Search, Users, Pencil } from 'lucide-react';
+import { Plus, Search, Users, Pencil, Printer, MessageCircle } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Badge, Button, Card, Input, Modal, EmptyState } from '@/components/ui';
+import { Badge, Button, Card, Input, Modal, EmptyState, toast } from '@/components/ui';
 import LedgerPanel from '@/components/customers/LedgerPanel';
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll';
 import { apiErrorMessage } from '@/services';
-import { customersApi } from '@/services/endpoints';
+import { customersApi, inventoryApi } from '@/services/endpoints';
 import { useCan, usePOSStore } from '@/store';
 import { useTranslation } from '@/i18n';
 import { formatCurrency } from '@/utils';
+import { khataWhatsAppText, printKhataStatement } from '@/utils/khataPrint';
 import type { Customer } from '@/types';
 
 const PAGE_SIZE = 40;
@@ -161,7 +162,36 @@ export default function CustomersPage() {
       <Modal open={!!viewing} onClose={() => setViewing(null)} title={viewing?.name ?? ''} size="lg">
         {viewing && (
           <div className="space-y-3">
-            <p className="text-sm">{t('customers.owes')}: <strong>{formatCurrency(Number(viewing.balance))}</strong></p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm">{t('customers.owes')}: <strong>{formatCurrency(Number(viewing.balance))}</strong></p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    const [{ data: entries }, { data: branch }] = await Promise.all([
+                      customersApi.ledger(viewing.id),
+                      inventoryApi.branch().catch(() => ({ data: { name: 'Tijori POS' } })),
+                    ]);
+                    printKhataStatement(viewing, entries, branch.name || 'Tijori POS');
+                  }}
+                >
+                  <Printer className="me-1.5 h-3.5 w-3.5" /> {t('customers.printStatement')}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    const { data: branch } = await inventoryApi.branch().catch(() => ({ data: { name: 'Tijori POS' } }));
+                    const text = khataWhatsAppText(viewing, branch.name || 'Tijori POS');
+                    await navigator.clipboard.writeText(text);
+                    toast(t('customers.statementCopied'));
+                  }}
+                >
+                  <MessageCircle className="me-1.5 h-3.5 w-3.5" /> {t('customers.copyWhatsApp')}
+                </Button>
+              </div>
+            </div>
             <LedgerPanel
               key={viewing.id}
               canPay={can('customers.collect')}

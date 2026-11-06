@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AreaChart,
@@ -14,36 +15,41 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import {
-  ArrowRight,
-  ShoppingCart,
-  Sparkles,
-  Users,
-  MapPin,
-  CreditCard,
-  Clock,
-  Activity,
-  TrendingUp,
-  UserPlus,
-  RefreshCw,
-} from 'lucide-react';
+import { ArrowRight, ShoppingCart, Sparkles, CreditCard, Clock, Activity, Wallet } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
 import { Card, CardHeader, CardTitle, KPICard, Button, Badge } from '@/components/ui';
-import { MOCK_KPIS, SALES_CHART_DATA, TOP_PRODUCTS } from '@/utils/mockData';
-import {
-  DEMOGRAPHICS_DATA,
-  TOP_AREAS_DATA,
-  PAYMENT_METHODS_DATA,
-  PEAK_HOURS_DATA,
-  RECENT_ACTIVITY,
-  CUSTOMER_INSIGHTS,
-  COUNTER_PERFORMANCE,
-} from '@/utils/analyticsData';
-import { formatCurrency, formatCurrencyCompact } from '@/utils';
+import { salesApi } from '@/services/endpoints';
+import { useCan } from '@/store';
+import { formatCurrency, formatCurrencyCompact, formatDate } from '@/utils';
 import { useTranslation } from '@/i18n';
+import type { DashboardData, KPIData } from '@/types';
+
+const SERIES_COLORS = ['#01411C', '#71717a', '#b45309', '#1d4ed8'];
+const METHOD_KEYS: Record<string, string> = {
+  cash: 'pos.cash',
+  jazzcash: 'pos.jazzcash',
+  easypaisa: 'pos.easypaisa',
+  card: 'pos.cardShort',
+  credit: 'pos.onCredit',
+};
+
+function EmptyChart({ text }: { text: string }) {
+  return <p className="flex h-full items-center justify-center text-center text-sm text-brand-500">{text}</p>;
+}
 
 export default function DashboardPage() {
   const { t } = useTranslation();
+  const can = useCan();
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  const load = useCallback(() => {
+    setFailed(false);
+    salesApi.dashboard().then((response) => setData(response.data)).catch(() => setFailed(true));
+  }, []);
+
+  useEffect(load, [load]);
+
   const hour = new Date().getHours();
   const subtitle =
     hour < 12
@@ -52,20 +58,58 @@ export default function DashboardPage() {
         ? t('dashboard.subtitleAfternoon')
         : t('dashboard.subtitleEvening');
 
+  const header = (
+    <Header
+      title={t('dashboard.title')}
+      subtitle={subtitle}
+      actions={can('pos.sell') && (
+        <Link to="/pos">
+          <Button variant="accent" size="md">
+            <ShoppingCart className="h-4 w-4" />
+            {t('common.openPos')}
+          </Button>
+        </Link>
+      )}
+    />
+  );
+
+  if (!data) {
+    return (
+      <>
+        {header}
+        <main className="page-bg flex flex-1 flex-col items-center justify-center gap-3 p-6 text-sm text-brand-500">
+          {failed ? (
+            <>
+              <p role="alert">{t('dashboard.loadError')}</p>
+              <Button variant="outline" size="sm" onClick={load}>{t('common.retry')}</Button>
+            </>
+          ) : t('common.loading')}
+        </main>
+      </>
+    );
+  }
+
+  const revenue = Number(data.today_revenue);
+  const yesterday = Number(data.yesterday_revenue);
+  const change = yesterday > 0 ? Math.round(((revenue - yesterday) / yesterday) * 1000) / 10 : 0;
+  const kpis: KPIData[] = [
+    { labelKey: 'dashboard.kpiTodaySales', value: formatCurrency(revenue), change, trend: change > 0 ? 'up' : change < 0 ? 'down' : 'neutral', icon: 'sales' },
+    { labelKey: 'dashboard.kpiTransactions', value: String(data.today_count), change: 0, trend: 'neutral', icon: 'receipt' },
+    { labelKey: 'dashboard.kpiLowStock', value: String(data.stock.low + data.stock.out), change: 0, trend: 'neutral', icon: 'alert' },
+    { labelKey: 'dashboard.kpiActiveCounters', value: `${data.open_counters} / ${data.total_counters}`, change: 0, trend: 'neutral', icon: 'counter' },
+  ];
+  const chartRows = data.sales_by_day.map((row) => ({
+    day: row.day,
+    ...Object.fromEntries(data.counters.map((name) => [name, Number(row[name] ?? 0)])),
+  }));
+  const hasWeekSales = data.sales_by_day.some((row) => data.counters.some((name) => Number(row[name] ?? 0) > 0));
+  const paymentRows = data.payment_methods.map((row) => ({ name: t(METHOD_KEYS[row.method]), value: Number(row.amount) }));
+  const peakRows = data.peak_hours.map((row) => ({ hour: `${String(row.hour).padStart(2, '0')}:00`, sales: row.count }));
+  const noData = t('dashboard.noData');
+
   return (
     <>
-      <Header
-        title={t('dashboard.title')}
-        subtitle={subtitle}
-        actions={
-          <Link to="/pos">
-            <Button variant="accent" size="md">
-              <ShoppingCart className="h-4 w-4" />
-              {t('common.openPos')}
-            </Button>
-          </Link>
-        }
-      />
+      {header}
 
       <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6">
         {/* Hero */}
@@ -79,45 +123,34 @@ export default function DashboardPage() {
                 <span>{t('dashboard.heroBadge')} · {t('common.pakistan')}</span>
               </div>
               <h2 className="font-display text-2xl font-bold">{t('dashboard.heroTitle')}</h2>
-              <p className="mt-1 max-w-lg text-sm text-white/60">{t('dashboard.heroDesc')}</p>
+              <p className="mt-1 max-w-lg text-sm text-white/60">
+                {t('dashboard.heroDescReal', {
+                  open: data.open_counters,
+                  total: data.total_counters,
+                  count: data.today_count,
+                  revenue: formatCurrency(revenue),
+                })}
+              </p>
             </div>
-            <Link to="/pos" className="hidden sm:block">
-              <Button size="lg" className="bg-white text-brand-900 hover:bg-brand-100">
-                <ShoppingCart className="h-5 w-5" />
-                {t('common.startBilling')}
-              </Button>
-            </Link>
+            {can('pos.sell') && (
+              <Link to="/pos" className="hidden sm:block">
+                <Button size="lg" className="!bg-white !text-brand-900 hover:!bg-brand-100">
+                  <ShoppingCart className="h-5 w-5" />
+                  {t('common.startBilling')}
+                </Button>
+              </Link>
+            )}
           </div>
         </div>
 
         {/* KPIs */}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {MOCK_KPIS.map((kpi) => (
+          {kpis.map((kpi) => (
             <KPICard key={kpi.labelKey} {...kpi} />
           ))}
         </div>
 
-        {/* Customer Insights strip */}
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            { icon: UserPlus, label: t('dashboard.newCustomers'), value: CUSTOMER_INSIGHTS.newCustomers, color: 'text-blue-600' },
-            { icon: RefreshCw, label: t('dashboard.returningCustomers'), value: CUSTOMER_INSIGHTS.returningCustomers, color: 'text-emerald-600' },
-            { icon: ShoppingCart, label: t('dashboard.avgBasketSize'), value: `${CUSTOMER_INSIGHTS.avgBasketSize} ${t('common.items')}`, color: 'text-violet-600' },
-            { icon: TrendingUp, label: t('dashboard.customerRetention'), value: `${CUSTOMER_INSIGHTS.retentionRate}%`, color: 'text-accent' },
-          ].map((item) => (
-            <Card key={item.label} padding="sm" hover className="flex items-center gap-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-100 dark:bg-brand-800">
-                <item.icon className={`h-5 w-5 ${item.color}`} />
-              </div>
-              <div>
-                <p className="text-xs text-brand-500">{item.label}</p>
-                <p className="font-display text-xl font-bold">{item.value}</p>
-              </div>
-            </Card>
-          ))}
-        </div>
-
-        {/* Sales chart + Demographics */}
+        {/* Sales chart + Top products */}
         <div className="mt-6 grid gap-6 lg:grid-cols-3">
           <Card className="lg:col-span-2" hover>
             <CardHeader>
@@ -128,85 +161,56 @@ export default function DashboardPage() {
               <Badge>{t('common.pkr')}</Badge>
             </CardHeader>
             <div className="h-72">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={SALES_CHART_DATA}>
-                  <defs>
-                    <linearGradient id="c1" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#01411C" stopOpacity={0.25} />
-                      <stop offset="100%" stopColor="#01411C" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="c2" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#71717a" stopOpacity={0.15} />
-                      <stop offset="100%" stopColor="#71717a" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" vertical={false} />
-                  <XAxis dataKey="day" tick={{ fontSize: 12, fill: '#a1a1aa' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: '#a1a1aa' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatCurrencyCompact(v)} width={70} />
-                  <Tooltip formatter={(value: number) => [formatCurrency(value), '']} contentStyle={{ borderRadius: '16px', fontSize: '13px' }} />
-                  <Area type="monotone" dataKey="counter1" name="Counter 1" stroke="#01411C" fill="url(#c1)" strokeWidth={2.5} />
-                  <Area type="monotone" dataKey="counter2" name="Counter 2" stroke="#71717a" fill="url(#c2)" strokeWidth={2} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-
-          <Card hover>
-            <CardHeader>
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <Users className="h-5 w-5 text-accent" />
-                  {t('dashboard.demographics')}
-                </CardTitle>
-                <p className="mt-0.5 text-xs text-brand-500">{t('dashboard.demographicsDesc')}</p>
-              </div>
-            </CardHeader>
-            <div className="h-52">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={DEMOGRAPHICS_DATA} dataKey="customers" nameKey="ageGroup" cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3}>
-                    {DEMOGRAPHICS_DATA.map((entry, i) => (
-                      <Cell key={i} fill={entry.fill} />
+              {hasWeekSales ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartRows}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgb(0 0 0 / 0.06)" vertical={false} />
+                    <XAxis dataKey="day" tick={{ fontSize: 12, fill: '#a1a1aa' }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11, fill: '#a1a1aa' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatCurrencyCompact(v)} width={70} />
+                    <Tooltip formatter={(value: number, name: string) => [formatCurrency(value), name]} contentStyle={{ borderRadius: '16px', fontSize: '13px' }} />
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '11px' }} />
+                    {data.counters.map((name, index) => (
+                      <Area
+                        key={name}
+                        type="monotone"
+                        dataKey={name}
+                        name={name}
+                        stroke={SERIES_COLORS[index % SERIES_COLORS.length]}
+                        fill={SERIES_COLORS[index % SERIES_COLORS.length]}
+                        fillOpacity={0.1}
+                        strokeWidth={2}
+                      />
                     ))}
-                  </Pie>
-                  <Tooltip formatter={(value: number) => [`${value}%`, '']} />
-                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '11px' }} />
-                </PieChart>
-              </ResponsiveContainer>
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : <EmptyChart text={noData} />}
             </div>
           </Card>
-        </div>
 
-        {/* Areas + Payment + Peak hours */}
-        <div className="mt-6 grid gap-6 lg:grid-cols-3">
           <Card hover>
             <CardHeader>
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  <MapPin className="h-5 w-5 text-accent" />
-                  {t('dashboard.topAreas')}
-                </CardTitle>
-                <p className="mt-0.5 text-xs text-brand-500">{t('dashboard.topAreasDesc')}</p>
-              </div>
+              <CardTitle>{t('dashboard.topProducts')}</CardTitle>
             </CardHeader>
-            <div className="space-y-3">
-              {TOP_AREAS_DATA.map((area) => (
-                <div key={area.area}>
-                  <div className="mb-1 flex justify-between text-sm">
-                    <span className="font-medium">{area.area}</span>
-                    <span className="text-brand-500">{area.customers} · {area.percentage}%</span>
+            {data.top_products.length === 0 && <p className="py-8 text-center text-sm text-brand-500">{noData}</p>}
+            <div className="space-y-1">
+              {data.top_products.map((product, i) => (
+                <div key={product.name} className="flex items-center gap-3 rounded-xl p-3 transition-colors hover:bg-brand-50 dark:hover:bg-brand-800/40">
+                  <span className={`flex h-8 w-8 items-center justify-center rounded-lg text-xs font-bold ${i === 0 ? 'bg-accent/15 text-accent' : 'bg-brand-100 text-brand-600 dark:bg-brand-800'}`}>
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{product.name}</p>
+                    <p className="text-xs text-brand-500">{Number(product.units)} {t('dashboard.unitsSold')}</p>
                   </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-brand-100 dark:bg-brand-800">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-accent to-accent-glow transition-all"
-                      style={{ width: `${area.percentage}%` }}
-                    />
-                  </div>
+                  <p className="text-sm font-bold">{formatCurrency(Number(product.revenue))}</p>
                 </div>
               ))}
             </div>
           </Card>
+        </div>
 
+        {/* Payment + Peak hours + Shifts */}
+        <div className="mt-6 grid gap-6 lg:grid-cols-3">
           <Card hover>
             <CardHeader>
               <div>
@@ -218,16 +222,19 @@ export default function DashboardPage() {
               </div>
             </CardHeader>
             <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={PAYMENT_METHODS_DATA} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label={({ name, value }) => `${name} ${value}%`} labelLine={false}>
-                    {PAYMENT_METHODS_DATA.map((entry, i) => (
-                      <Cell key={i} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
+              {paymentRows.length ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={paymentRows} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={2}>
+                      {paymentRows.map((row, i) => (
+                        <Cell key={row.name} fill={SERIES_COLORS[i % SERIES_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                    <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: '11px' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : <EmptyChart text={noData} />}
             </div>
           </Card>
 
@@ -242,38 +249,17 @@ export default function DashboardPage() {
               </div>
             </CardHeader>
             <div className="h-48">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={PEAK_HOURS_DATA}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgb(0 0 0 / 0.06)" />
-                  <XAxis dataKey="hour" tick={{ fontSize: 10, fill: '#a1a1aa' }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: '#a1a1aa' }} axisLine={false} tickLine={false} />
-                  <Tooltip />
-                  <Bar dataKey="sales" fill="#01411C" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-        </div>
-
-        {/* Top products + Recent activity + Counter performance */}
-        <div className="mt-6 grid gap-6 lg:grid-cols-3">
-          <Card hover>
-            <CardHeader>
-              <CardTitle>{t('dashboard.topProducts')}</CardTitle>
-            </CardHeader>
-            <div className="space-y-1">
-              {TOP_PRODUCTS.map((product, i) => (
-                <div key={product.name} className="flex items-center gap-3 rounded-xl p-3 transition-colors hover:bg-brand-50 dark:hover:bg-brand-800/40">
-                  <span className={`flex h-8 w-8 items-center justify-center rounded-lg text-xs font-bold ${i === 0 ? 'bg-accent/15 text-accent' : 'bg-brand-100 text-brand-600 dark:bg-brand-800'}`}>
-                    {i + 1}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{product.name}</p>
-                    <p className="text-xs text-brand-500">{product.sales} {t('dashboard.unitsSold')}</p>
-                  </div>
-                  <p className="text-sm font-bold">{formatCurrency(product.revenue)}</p>
-                </div>
-              ))}
+              {peakRows.length ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={peakRows}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgb(0 0 0 / 0.06)" />
+                    <XAxis dataKey="hour" tick={{ fontSize: 10, fill: '#a1a1aa' }} axisLine={false} tickLine={false} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#a1a1aa' }} axisLine={false} tickLine={false} />
+                    <Tooltip />
+                    <Bar dataKey="sales" fill="#01411C" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : <EmptyChart text={noData} />}
             </div>
           </Card>
 
@@ -281,29 +267,49 @@ export default function DashboardPage() {
             <CardHeader>
               <div>
                 <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-5 w-5 text-accent" />
-                  {t('dashboard.recentActivity')}
+                  <Wallet className="h-5 w-5 text-accent" />
+                  {t('dashboard.recentShifts')}
                 </CardTitle>
-                <p className="mt-0.5 text-xs text-brand-500">{t('dashboard.recentActivityDesc')}</p>
+                <p className="mt-0.5 text-xs text-brand-500">{t('dashboard.recentShiftsDesc')}</p>
               </div>
             </CardHeader>
-            <div className="space-y-3">
-              {RECENT_ACTIVITY.map((item) => (
-                <div key={item.id} className="flex items-center gap-3 rounded-xl border border-brand-100 p-3 dark:border-brand-800">
-                  <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${
-                    item.type === 'sale' ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50' :
-                    item.type === 'stock' ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/50' :
-                    'bg-blue-50 text-blue-600 dark:bg-blue-950/50'
-                  }`}>
-                    {item.type === 'sale' ? '₨' : item.type === 'stock' ? '!' : 'P'}
+            {data.recent_shifts.length === 0 && <p className="py-8 text-center text-sm text-brand-500">{noData}</p>}
+            <div className="space-y-2">
+              {data.recent_shifts.map((shift) => {
+                const difference = Number(shift.difference);
+                return (
+                  <div key={shift.id} className="flex items-center justify-between gap-3 rounded-xl border border-brand-100 p-3 dark:border-brand-800">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{shift.terminal_name} · {shift.opened_by_name}</p>
+                      <p className="text-xs text-brand-500">{shift.closed_at && formatDate(shift.closed_at)}</p>
+                    </div>
+                    <Badge variant={difference === 0 ? 'success' : 'danger'}>
+                      {difference > 0 ? '+' : ''}{formatCurrency(difference)}
+                    </Badge>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{item.desc}</p>
-                    <p className="text-xs text-brand-500">{item.counter} {item.method && `· ${item.method}`} · {item.time}</p>
-                  </div>
-                  {item.amount > 0 && (
-                    <p className="text-sm font-bold">{formatCurrency(item.amount)}</p>
-                  )}
+                );
+              })}
+            </div>
+          </Card>
+        </div>
+
+        {/* Activity + Stock alerts */}
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <Card hover>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Activity className="h-5 w-5 text-accent" />
+                {t('dashboard.recentActivity')}
+              </CardTitle>
+            </CardHeader>
+            <div className="space-y-2">
+              {data.recent_activity.map((item) => (
+                <div key={item.id} className="rounded-xl border border-brand-100 p-3 dark:border-brand-800">
+                  <p className="truncate text-sm font-medium">
+                    {t(`dashboard.activity.${item.action}`)}
+                    {item.target && <span className="font-normal text-brand-500"> · {item.target}</span>}
+                  </p>
+                  <p className="text-xs text-brand-500">{item.user} · {formatDate(item.created_at)}</p>
                 </div>
               ))}
             </div>
@@ -311,50 +317,32 @@ export default function DashboardPage() {
 
           <Card hover>
             <CardHeader>
-              <CardTitle>{t('dashboard.counterPerformance')}</CardTitle>
-              <Badge variant="success">+{CUSTOMER_INSIGHTS.growth}% {t('dashboard.growth')}</Badge>
+              <CardTitle>{t('dashboard.stockAlerts')}</CardTitle>
+              {can('products.edit') && (
+                <Link to="/inventory">
+                  <Button variant="ghost" size="sm">
+                    {t('dashboard.viewInventory')} <ArrowRight className="h-4 w-4 rtl:rotate-180" />
+                  </Button>
+                </Link>
+              )}
             </CardHeader>
-            <div className="space-y-4">
-              {COUNTER_PERFORMANCE.map((c) => (
-                <div key={c.counter} className="rounded-xl border border-brand-100 p-4 dark:border-brand-800">
+            <div className="grid gap-3 sm:grid-cols-3">
+              {[
+                { label: t('dashboard.outOfStock'), count: data.stock.out, variant: 'danger' as const, desc: t('dashboard.needsRestock') },
+                { label: t('dashboard.lowStock'), count: data.stock.low, variant: 'warning' as const, desc: t('dashboard.belowThreshold') },
+                { label: t('dashboard.inStock'), count: data.stock.ok, variant: 'success' as const, desc: t('dashboard.healthyLevels') },
+              ].map((item) => (
+                <div key={item.label} className="rounded-xl border border-brand-100 bg-brand-50/50 p-4 dark:border-brand-800 dark:bg-brand-800/20">
                   <div className="flex items-center justify-between">
-                    <p className="font-semibold">{c.counter}</p>
-                    <Badge>{c.transactions} txns</Badge>
+                    <span className="text-sm font-medium">{item.label}</span>
+                    <Badge variant={item.variant}>{item.count}</Badge>
                   </div>
-                  <p className="mt-2 font-display text-2xl font-bold">{formatCurrency(c.sales)}</p>
-                  <p className="mt-1 text-xs text-brand-500">Avg. {formatCurrency(c.avgBill)} / bill</p>
+                  <p className="mt-1 text-xs text-brand-500">{item.desc}</p>
                 </div>
               ))}
             </div>
           </Card>
         </div>
-
-        {/* Stock alerts */}
-        <Card className="mt-6" hover>
-          <CardHeader>
-            <CardTitle>{t('dashboard.stockAlerts')}</CardTitle>
-            <Link to="/inventory">
-              <Button variant="ghost" size="sm">
-                {t('dashboard.viewInventory')} <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
-          </CardHeader>
-          <div className="grid gap-3 sm:grid-cols-3">
-            {[
-              { label: t('dashboard.outOfStock'), count: 3, variant: 'danger' as const, desc: t('dashboard.needsRestock') },
-              { label: t('dashboard.lowStock'), count: 14, variant: 'warning' as const, desc: t('dashboard.belowThreshold') },
-              { label: t('dashboard.inStock'), count: 186, variant: 'success' as const, desc: t('dashboard.healthyLevels') },
-            ].map((item) => (
-              <div key={item.label} className="rounded-xl border border-brand-100 bg-brand-50/50 p-4 dark:border-brand-800 dark:bg-brand-800/20">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">{item.label}</span>
-                  <Badge variant={item.variant}>{item.count}</Badge>
-                </div>
-                <p className="mt-1 text-xs text-brand-500">{item.desc}</p>
-              </div>
-            ))}
-          </div>
-        </Card>
       </main>
     </>
   );

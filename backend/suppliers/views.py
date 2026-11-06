@@ -1,17 +1,21 @@
-from django.db.models import Q
+from django.db.models import ProtectedError, Q
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from suppliers.models import Supplier
+from auth.permissions import requires
+from audit.models import log_event
+from suppliers.models import Supplier, SupplierLedgerEntry, post_supplier_entry
 from suppliers.serializers import (
     CreateSupplierSerializer, SupplierListSerializer,
     SupplierDetailSerializer, UpdateSupplierSerializer,
-    BulkDeleteSupplierSerializer,
+    BulkDeleteSupplierSerializer, SupplierLedgerSerializer, SupplierPaymentInput,
 )
 
 
 class ListCreateSupplierDataView(APIView):
+    permission_classes = [requires('suppliers.view', 'suppliers.edit')]
+
     SORTABLE_FIELDS = {
         "id",
         "name",
@@ -62,7 +66,7 @@ class ListCreateSupplierDataView(APIView):
             "-created_at",
         )
 
-        ordering_field = ordering.replace("-", "")
+        ordering_field = ordering.removeprefix("-")
 
         if ordering_field in self.SORTABLE_FIELDS:
             queryset = queryset.order_by(ordering)
@@ -114,6 +118,7 @@ class ListCreateSupplierDataView(APIView):
     def post(self, request):
         serializer = CreateSupplierSerializer(
             data=request.data,
+            context={"request": request},
         )
 
         serializer.is_valid(raise_exception=True)
@@ -126,6 +131,7 @@ class ListCreateSupplierDataView(APIView):
 
 
 class RetrieveUpdateDeleteSupplierDataView(APIView):
+    permission_classes = [requires('suppliers.view', 'suppliers.edit')]
 
     def get_object(self, supplier_id):
         try:
@@ -206,12 +212,19 @@ class RetrieveUpdateDeleteSupplierDataView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        supplier.delete()
+        try:
+            supplier.delete()
+        except ProtectedError:
+            return Response(
+                {"detail": "This supplier has products linked to it. Mark it inactive instead."},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BulkDeleteSupplierDataView(APIView):
+    permission_classes = [requires('suppliers.view', 'suppliers.edit')]
 
     def post(self, request):
         serializer = BulkDeleteSupplierSerializer(
@@ -221,11 +234,17 @@ class BulkDeleteSupplierDataView(APIView):
 
         supplier_ids = serializer.validated_data["ids"]
 
-        deleted_count, _ = (
-            Supplier.objects
-            .filter(id__in=supplier_ids)
-            .delete()
-        )
+        try:
+            deleted_count, _ = (
+                Supplier.objects
+                .filter(id__in=supplier_ids)
+                .delete()
+            )
+        except ProtectedError:
+            return Response(
+                {"detail": "Some suppliers have products linked to them. Mark them inactive instead."},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         return Response(
             {
@@ -233,3 +252,27 @@ class BulkDeleteSupplierDataView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class SupplierLedgerView(APIView):
+    permission_classes = [requires("suppliers.view", "suppliers.pay")]
+
+    def get(self, request, supplier_id):
+        entries = SupplierLedgerEntry.objects.filter(supplier_id=supplier_id).select_related("user")[:200]
+        return Response(SupplierLedgerSerializer(entries, many=True).data)
+
+    def post(self, request, supplier_id):
+        """Records money paid to the supplier."""
+        data = SupplierPaymentInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        supplier = Supplier.objects.filter(pk=supplier_id).first()
+        if not supplier:
+            return Response({"detail": "Supplier not found."}, status=status.HTTP_404_NOT_FOUND)
+        values = data.validated_data
+        post_supplier_entry(
+            supplier.pk, -values["amount"], SupplierLedgerEntry.Kind.PAYMENT, request.user,
+            method=values["method"], reference=values["reference"],
+        )
+        log_event(request.user, "supplier_paid", supplier.name, {"amount": str(values["amount"]), "method": values["method"]})
+        supplier.refresh_from_db()
+        return Response(SupplierDetailSerializer(supplier).data, status=status.HTTP_201_CREATED)

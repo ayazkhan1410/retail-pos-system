@@ -1,15 +1,16 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+from auth.catalog import ALL_PERMISSIONS
 from auth.manager import CustomUserManager
 
 
 class UserRole(models.TextChoices):
-    """POS roles — wire to Django groups/permissions in a later phase."""
-
     OWNER = 'owner', 'Owner'
     MANAGER = 'manager', 'Manager'
     CASHIER = 'cashier', 'Cashier'
+    STOCK_KEEPER = 'stock_keeper', 'Stock Keeper'
+    ACCOUNTANT = 'accountant', 'Accountant'
 
 
 class CustomUser(AbstractUser):
@@ -51,9 +52,24 @@ class CustomUser(AbstractUser):
         return self.role == UserRole.OWNER or self.is_superuser
 
     @property
-    def is_manager(self):
-        return self.role in (UserRole.OWNER, UserRole.MANAGER) or self.is_superuser
+    def permission_codes(self):
+        if self.is_owner:
+            return set(ALL_PERMISSIONS)
+        if not hasattr(self, '_permission_codes'):
+            self._permission_codes = set(
+                RolePermission.objects.filter(role=self.role).values_list('permission', flat=True)
+            )
+        return self._permission_codes
 
-    @property
-    def is_cashier(self):
-        return self.role == UserRole.CASHIER
+    def can(self, code):
+        return code in self.permission_codes
+
+
+class RolePermission(models.Model):
+    """What each role may do. Owners can edit this in Settings; the owner role itself always has everything."""
+
+    role = models.CharField(max_length=20, choices=UserRole.choices)
+    permission = models.CharField(max_length=40)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['role', 'permission'], name='unique_role_permission')]

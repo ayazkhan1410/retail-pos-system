@@ -40,6 +40,7 @@ export function mapSupplierFromApi(data: SupplierApi): Supplier {
   return {
     id: String(data.id),
     name: data.name,
+    contactPerson: data.contact_person ?? '',
     phone: data.phone ?? '',
     email: data.email ?? '',
     address: data.address ?? '',
@@ -58,12 +59,14 @@ export function mapSupplierFromApi(data: SupplierApi): Supplier {
 export function mapSupplierToApi(data: SupplierFormData): Record<string, unknown> {
   return {
     name: data.name.trim(),
+    contact_person: data.contactPerson || null,
     phone: data.phone || null,
     email: data.email || null,
     address: data.address || null,
     city: data.city || null,
     ntn: data.ntn || null,
     bank_account: data.bankAccount || null,
+    // Only used on create as the opening balance; after that the ledger owns it.
     credit_balance: data.currentBalance,
     payment_type: data.paymentType,
     status: data.status,

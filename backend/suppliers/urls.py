@@ -4,6 +4,7 @@ from suppliers.views import (
     ListCreateSupplierDataView,
     RetrieveUpdateDeleteSupplierDataView,
     BulkDeleteSupplierDataView,
+    SupplierLedgerView,
 )
 
 
@@ -18,6 +19,7 @@ urlpatterns = [
         BulkDeleteSupplierDataView.as_view(),
         name="bulk-delete-supplier",
     ),
+    path("<int:supplier_id>/ledger/", SupplierLedgerView.as_view()),
     path(
         "<int:supplier_id>/",
         RetrieveUpdateDeleteSupplierDataView.as_view(),

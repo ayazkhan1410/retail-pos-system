@@ -25,6 +25,7 @@ import { printReceipt } from '@/utils/receiptPrint';
 import { apiErrorMessage } from '@/services';
 import { auditApi, customersApi, salesApi } from '@/services/endpoints';
 import CashQuickModal from '@/components/pos/CashQuickModal';
+import ChangeFlash from '@/components/pos/ChangeFlash';
 import PaymentModal, { type PaymentResult } from '@/components/pos/PaymentModal';
 import { CloseShiftModal, OpenShiftModal, ShiftSummaryModal } from '@/components/pos/ShiftModals';
 import type { CartItem, Customer, PaymentMethod, Product, Sale, Shift, Terminal } from '@/types';
@@ -133,6 +134,8 @@ export default function POSPage() {
   const [submitting, setSubmitting] = useState(false);
   const [payError, setPayError] = useState('');
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
+  /** Cash change shown full-screen for a few seconds after Take. */
+  const [changeFlash, setChangeFlash] = useState<{ amount: number; invoiceNo: string } | null>(null);
   const [category, setCategory] = useState('All');
   const [productSearch, setProductSearch] = useState('');
   const [scanFlash, setScanFlash] = useState(false);
@@ -141,7 +144,7 @@ export default function POSPage() {
   // Kept until the bill changes, so a retry after a lost reply can't charge the customer twice.
   const saleUuid = useRef(newUuid());
 
-  const modalOpen = !!payMethod || !!completedSale || closingShift || !!closedShift || (shiftLoaded && !shift);
+  const modalOpen = !!payMethod || !!completedSale || !!changeFlash || closingShift || !!closedShift || (shiftLoaded && !shift);
 
   const focusScanner = useCallback(() => {
     window.requestAnimationFrame(() => scannerRef.current?.focus());
@@ -303,11 +306,16 @@ export default function POSPage() {
       clearCart();
       setPayMethod(null);
       setFullPayForm(false);
-      setCompletedSale(sale);
       setNotice(null);
-      // Cash lane: print immediately so the next customer can start.
-      if (result.payments.every((p) => p.method === 'cash')) {
+      const cashOnly = result.payments.length > 0 && result.payments.every((p) => p.method === 'cash');
+      if (result.print) {
         void printReceipt(sale);
+      }
+      if (cashOnly) {
+        setCompletedSale(null);
+        setChangeFlash({ amount: Number(sale.change_due), invoiceNo: sale.invoice_no });
+      } else {
+        setCompletedSale(sale);
       }
     };
     try {
@@ -786,6 +794,17 @@ export default function POSPage() {
           }}
           onConfirm={(result) => void completeSale(result)}
         />
+
+        {changeFlash && (
+          <ChangeFlash
+            amount={changeFlash.amount}
+            invoiceNo={changeFlash.invoiceNo}
+            onDone={() => {
+              setChangeFlash(null);
+              focusScanner();
+            }}
+          />
+        )}
 
         <Modal
           open={!!completedSale}

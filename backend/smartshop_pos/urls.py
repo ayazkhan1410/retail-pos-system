@@ -1,8 +1,8 @@
 from django.contrib import admin
-from django.urls import path, include
-from smartshop_pos.views import HealthCheckView
-from smartshop_pos.system_views import AppVersionView, DatabaseBackupView
+from django.urls import include, path
 
+from smartshop_pos.system_views import AppVersionView, DatabaseBackupView
+from smartshop_pos.views import HealthCheckView
 
 urlpatterns = [
     path('admin/', admin.site.urls),

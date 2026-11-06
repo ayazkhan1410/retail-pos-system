@@ -48,7 +48,7 @@ class UserSerializer(serializers.ModelSerializer):
         if value in (None, ''):
             return ''
         if not value.isdigit() or not (4 <= len(value) <= 6):
-            raise serializers.ValidationError('PIN must be 4–6 digits.')
+            raise serializers.ValidationError('PIN must be 4-6 digits.')
         return value
 
     def create(self, validated_data):

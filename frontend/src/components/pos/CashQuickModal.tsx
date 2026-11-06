@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Printer } from 'lucide-react';
 import { Modal, Button, Input } from '@/components/ui';
 import { useTranslation } from '@/i18n';
 import { formatCurrency, cn } from '@/utils';
@@ -40,19 +41,22 @@ export default function CashQuickModal({
     });
   }, [open, due]);
 
-  const given = tendered.trim() === '' ? due : Number(tendered);
+  const hasEntered = tendered.trim() !== '';
+  const given = hasEntered ? Number(tendered) : 0;
   const paid = Number.isFinite(given) ? Math.round(Math.max(0, given) * 100) / 100 : 0;
-  const change = Math.round(Math.max(0, paid - due) * 100) / 100;
-  const short = Math.round(Math.max(0, due - paid) * 100) / 100;
-  const canSubmit = paid >= due && !submitting;
+  const change = hasEntered ? Math.round(Math.max(0, paid - due) * 100) / 100 : 0;
+  const short = hasEntered ? Math.round(Math.max(0, due - paid) * 100) / 100 : due;
+  // Must type an amount or tap Exact / a note — empty field keeps Take & Print locked.
+  const canSubmit = hasEntered && paid >= due && !submitting;
 
-  const submit = (event?: React.FormEvent) => {
+  const submit = (print: boolean, event?: React.FormEvent) => {
     event?.preventDefault();
     if (!canSubmit) return;
     onConfirm({
       discount: 0,
       customer: null,
       payments: [{ method: 'cash', amount: paid.toFixed(2) }],
+      print,
     });
   };
 
@@ -61,21 +65,36 @@ export default function CashQuickModal({
       open={open}
       onClose={onClose}
       preventClose={submitting}
-      size="sm"
+      size="md"
       title={t('pos.cashQuickTitle')}
       footer={
-        <>
-          <Button variant="ghost" size="sm" onClick={onNeedMoreOptions} disabled={submitting}>
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={onNeedMoreOptions} disabled={submitting} className="mr-auto">
             {t('pos.morePaymentOptions')}
           </Button>
           <Button variant="outline" onClick={onClose} disabled={submitting}>{t('common.cancel')}</Button>
-          <Button variant="accent" type="submit" form="cash-quick-form" loading={submitting} disabled={!canSubmit}>
-            {t('pos.cashAndPrint')}
+          <Button
+            variant="outline"
+            type="button"
+            loading={submitting}
+            disabled={!canSubmit}
+            onClick={() => submit(true)}
+          >
+            <Printer className="h-4 w-4" /> {t('pos.printReceipt')}
           </Button>
-        </>
+          <Button
+            variant="accent"
+            type="submit"
+            form="cash-quick-form"
+            loading={submitting}
+            disabled={!canSubmit}
+          >
+            {t('pos.takePayment')}
+          </Button>
+        </div>
       }
     >
-      <form id="cash-quick-form" onSubmit={submit} className="space-y-4">
+      <form id="cash-quick-form" onSubmit={(e) => submit(false, e)} className="space-y-4">
         <div className="rounded-2xl bg-brand-50 p-4 text-center dark:bg-brand-800/40">
           <p className="text-xs font-medium uppercase tracking-wide text-brand-500">{t('pos.amountDue')}</p>
           <p className="font-display text-4xl font-bold tabular-nums" data-testid="amount-due">
@@ -94,10 +113,7 @@ export default function CashQuickModal({
           placeholder={due.toFixed(2)}
           value={tendered}
           onChange={(e) => setTendered(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') submit();
-          }}
-          className="text-center text-2xl font-bold tabular-nums"
+          className="!h-14 text-center text-2xl font-bold tabular-nums"
         />
 
         <div className="flex flex-wrap gap-2">
@@ -123,19 +139,30 @@ export default function CashQuickModal({
           ))}
         </div>
 
-        <div className="rounded-2xl border border-brand-100 p-4 dark:border-brand-800">
+        <div className="rounded-2xl border-2 border-emerald-500/40 bg-emerald-500/5 px-3 py-5 text-center dark:border-emerald-500/30 sm:px-5">
           {short > 0 ? (
-            <div className="flex items-baseline justify-between text-red-600">
-              <span className="text-sm font-medium">{t('pos.remaining')}</span>
-              <span className="font-display text-3xl font-bold tabular-nums">{formatCurrency(short)}</span>
-            </div>
+            <>
+              <p className="text-sm font-medium text-red-600">{t('pos.remaining')}</p>
+              <p
+                dir="ltr"
+                className="font-display font-black leading-none tabular-nums text-red-600"
+                style={{ fontSize: 'clamp(2rem, 8vw, 3.5rem)' }}
+              >
+                {formatCurrency(short)}
+              </p>
+            </>
           ) : (
-            <div className="flex items-baseline justify-between text-emerald-600">
-              <span className="text-sm font-medium">{t('pos.changeDue')}</span>
-              <span className="font-display text-4xl font-bold tabular-nums" data-testid="change-preview">
+            <>
+              <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">{t('pos.changeDue')}</p>
+              <p
+                dir="ltr"
+                className="mt-1 font-display font-black leading-none tabular-nums text-emerald-500"
+                style={{ fontSize: 'clamp(2.25rem, 9vw, 4rem)' }}
+                data-testid="change-preview"
+              >
                 {formatCurrency(change)}
-              </span>
-            </div>
+              </p>
+            </>
           )}
         </div>
 

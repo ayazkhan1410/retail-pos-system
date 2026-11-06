@@ -80,7 +80,7 @@ def _save_lines(grn, values):
     grn.lines.all().delete()
     GRNLine.objects.bulk_create([
         GRNLine(grn=grn, line_total=computed['line_total'], unit_cost=computed['unit_cost'], margin_percent=computed['margin_percent'], **line)
-        for line, computed in zip(lines, result['lines'])
+        for line, computed in zip(lines, result['lines'], strict=True)
     ])
     return grn
 

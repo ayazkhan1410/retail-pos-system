@@ -5,9 +5,7 @@ class SuperuserMayDeleteMixin:
     """Allow Django superusers to delete (and edit) protected history rows."""
 
     def has_change_permission(self, request, obj=None):
-        if request.user.is_superuser:
-            return True
-        return False
+        return bool(request.user.is_superuser)
 
     def has_delete_permission(self, request, obj=None):
         return request.user.is_superuser

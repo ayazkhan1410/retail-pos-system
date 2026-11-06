@@ -1,12 +1,11 @@
 from django.urls import path
 
 from suppliers.views import (
+    BulkDeleteSupplierDataView,
     ListCreateSupplierDataView,
     RetrieveUpdateDeleteSupplierDataView,
-    BulkDeleteSupplierDataView,
     SupplierLedgerView,
 )
-
 
 urlpatterns = [
     path(

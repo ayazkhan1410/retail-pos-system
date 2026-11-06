@@ -46,7 +46,7 @@ def calculate(header, lines):
         shared += tax
 
     results = []
-    for line, net in zip(lines, nets):
+    for line, net in zip(lines, nets, strict=True):
         units = line['qty'] + line.get('free', 0)
         loaded = net + (shared * net / subtotal if subtotal else 0)
         cost = _money(loaded / units)

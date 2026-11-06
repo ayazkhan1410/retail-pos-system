@@ -2,8 +2,8 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
-from inventory.models import Product
 from customers.models import Customer
+from inventory.models import Product
 from sales.models import Payment, Sale, SaleLine, SaleReturn, Shift, Terminal
 
 

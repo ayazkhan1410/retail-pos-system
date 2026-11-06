@@ -9,14 +9,16 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-# shellcheck disable=SC1091
-. ./.env
-
-BACKUP_DIR="${BACKUP_DIR:-./backups}"
+BACKUP_DIR="./backups"
 mkdir -p "$BACKUP_DIR"
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 OUT="$BACKUP_DIR/smartshop-${STAMP}.sql"
 
-docker compose exec -T db pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" > "$OUT"
+# The database container already has these values; .env is not valid shell, so don't source it.
+if ! docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' > "$OUT"; then
+  rm -f "$OUT"
+  echo "Backup failed." >&2
+  exit 1
+fi
 echo "Backup saved: $OUT"

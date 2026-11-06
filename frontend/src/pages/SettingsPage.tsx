@@ -1,12 +1,15 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Card, CardHeader, CardTitle, Button, Input, Select, Badge, Modal, ProgressPanel } from '@/components/ui';
-import { useThemeStore } from '@/store';
+import { Card, CardHeader, CardTitle, Button, Input, Select, Badge } from '@/components/ui';
+import StaffCard from '@/components/settings/StaffCard';
+import RolesCard from '@/components/settings/RolesCard';
+import { useAuthStore, useCan, useThemeStore } from '@/store';
 import { useTranslation } from '@/i18n';
-import { healthApi, systemApi, type UpdateCheckResponse } from '@/services';
+import { apiErrorMessage, healthApi, inventoryApi, systemApi } from '@/services';
+import type { Branch } from '@/types';
 import LanguageToggle from '@/components/layout/LanguageToggle';
 import '@/types/desktop';
-import { Shield, Store, Bell, Database, Moon, Sun, MapPin, Languages, RefreshCw } from 'lucide-react';
+import { Store, Database, Moon, Sun, MapPin, Languages, RefreshCw } from 'lucide-react';
 
 type ApiHealthState = 'checking' | 'connected' | 'disconnected';
 
@@ -24,18 +27,11 @@ export default function SettingsPage() {
   const [appVersion, setAppVersion] = useState('0.1.0');
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupMessage, setBackupMessage] = useState('');
-  const [updateLoading, setUpdateLoading] = useState(false);
-  const [updateModalOpen, setUpdateModalOpen] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResponse | null>(null);
-  const [updateApplying, setUpdateApplying] = useState(false);
-  const [updateProgress, setUpdateProgress] = useState({ percent: 0, message: '' });
-  const [updateDismissed, setUpdateDismissed] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('');
-  const updateDismissedRef = useRef(false);
-
-  useEffect(() => {
-    updateDismissedRef.current = updateDismissed;
-  }, [updateDismissed]);
+  const can = useCan();
+  const isOwner = useAuthStore((state) => state.user?.role === 'owner');
+  const [store, setStore] = useState<Branch | null>(null);
+  const [storeSaving, setStoreSaving] = useState(false);
+  const [storeMessage, setStoreMessage] = useState('');
 
   const checkApiHealth = useCallback(async () => {
     setApiHealth('checking');
@@ -50,52 +46,27 @@ export default function SettingsPage() {
     }
   }, []);
 
-  const handleCheckUpdates = useCallback(async (options?: { auto?: boolean }) => {
-    const isAuto = options?.auto ?? false;
-    setUpdateLoading(true);
-    if (!isAuto) setStatusMessage('');
-    try {
-      const { data } = await systemApi.checkUpdates();
-      if (data.update_available) {
-        setUpdateInfo(data);
-        if (!isAuto || !updateDismissedRef.current) {
-          setUpdateModalOpen(true);
-        }
-      } else {
-        setUpdateInfo(null);
-        setUpdateDismissed(false);
-        if (!isAuto) {
-          setStatusMessage(t('settings.upToDate'));
-        }
-      }
-    } catch {
-      if (!isAuto) {
-        setStatusMessage(t('settings.updateCheckFailed'));
-      }
-    } finally {
-      setUpdateLoading(false);
-    }
-  }, [t]);
-
   useEffect(() => {
     checkApiHealth();
     systemApi.getVersion().then(({ data }) => setAppVersion(data.version)).catch(() => undefined);
-  }, [checkApiHealth]);
+    inventoryApi.branch().then(({ data }) => setStore(data)).catch(() => undefined);
+  }, [checkApiHealth, t]);
 
-  useEffect(() => {
-    handleCheckUpdates({ auto: true });
-    // Auto-check once on mount only — avoid re-running when callbacks change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = window.smartshop?.onUpdateProgress?.((payload) => {
-      setUpdateProgress(payload);
-    });
-    return () => {
-      unsubscribe?.();
-    };
-  }, []);
+  const saveStore = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!store) return;
+    setStoreSaving(true);
+    setStoreMessage('');
+    try {
+      const { data } = await inventoryApi.updateBranch(store);
+      setStore(data);
+      setStoreMessage(t('settings.storeSaved'));
+    } catch (err) {
+      setStoreMessage(apiErrorMessage(err, t('settings.storeSaveFailed')));
+    } finally {
+      setStoreSaving(false);
+    }
+  };
 
   const handleBackup = async () => {
     setBackupLoading(true);
@@ -111,41 +82,11 @@ export default function SettingsPage() {
       if (window.smartshop?.openBackupsFolder) {
         await window.smartshop.openBackupsFolder();
       }
-    } catch {
-      setBackupMessage(t('settings.backupFailed'));
+    } catch (err) {
+      setBackupMessage(apiErrorMessage(err, t('settings.backupFailed')));
     } finally {
       setBackupLoading(false);
     }
-  };
-
-  const handleDismissUpdate = () => {
-    if (updateApplying) return;
-    setUpdateModalOpen(false);
-    setUpdateDismissed(true);
-  };
-
-  const handleApplyUpdate = async () => {
-    setUpdateApplying(true);
-    setUpdateProgress({ percent: 0, message: t('settings.updateProgressStart') });
-    try {
-      if (window.smartshop?.applyUpdate) {
-        const result = await window.smartshop.applyUpdate();
-        setStatusMessage(result.message);
-        if (result.success) {
-          setUpdateDismissed(false);
-          setUpdateInfo(null);
-          setUpdateModalOpen(false);
-          setTimeout(() => window.location.reload(), 1500);
-          return;
-        }
-      } else {
-        setStatusMessage(t('settings.updateDesktopOnly'));
-      }
-    } catch {
-      setStatusMessage(t('settings.updateFailed'));
-    }
-    setUpdateApplying(false);
-    setUpdateProgress({ percent: 0, message: '' });
   };
 
   return (
@@ -182,53 +123,36 @@ export default function SettingsPage() {
             </div>
           </Card>
 
-          <Card hover className="overflow-hidden">
-            <div className="bg-gradient-to-r from-accent/10 to-transparent p-6">
-              <CardHeader className="mb-0">
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="h-5 w-5 text-accent" /> {t('settings.licenseStatus')}
-                </CardTitle>
-                <Badge variant="success">{t('common.active')}</Badge>
-              </CardHeader>
-            </div>
-            <div className="grid gap-4 p-6 sm:grid-cols-2">
-              {[
-                { label: t('settings.plan'), value: 'SmartShop POS Pro' },
-                { label: t('settings.validUntil'), value: '15 July 2026' },
-                { label: t('settings.installationId'), value: 'SS-PK-8f3a-2b1c' },
-                { label: t('settings.lastSynced'), value: t('settings.justNow') },
-              ].map((item) => (
-                <div key={item.label} className="rounded-xl border border-brand-100 p-4 dark:border-brand-800">
-                  <p className="text-xs font-medium text-brand-500">{item.label}</p>
-                  <p className="mt-1 font-semibold">{item.value}</p>
-                </div>
-              ))}
-            </div>
-            <div className="border-t border-brand-100 px-6 py-4 dark:border-brand-800">
-              <Button variant="outline" size="sm">{t('settings.syncLicense')}</Button>
-            </div>
-          </Card>
-
+          {can('settings.store') && (
           <Card hover>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Store className="h-5 w-5" /> {t('settings.storeInfo')}
               </CardTitle>
             </CardHeader>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Input label={t('settings.storeName')} defaultValue="Smart Mart Lahore" />
-              <Input label={t('settings.phone')} defaultValue="+92 300 1234567" />
-              <Input label={t('settings.address')} defaultValue="Main Boulevard, Gulberg III, Lahore" className="sm:col-span-2" />
-              <Input label={t('settings.ntn')} defaultValue="1234567-8" />
-              <div>
-                <Input label={t('settings.currency')} defaultValue="PKR (Rs.)" disabled />
-                <p className="mt-1 flex items-center gap-1 text-xs text-brand-500">
-                  <MapPin className="h-3 w-3" /> {t('common.pakistan')}
-                </p>
+            <form onSubmit={saveStore}>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Input label={t('settings.storeName')} required value={store?.name ?? ''} onChange={(e) => store && setStore({ ...store, name: e.target.value })} />
+                <Input label={t('settings.phone')} value={store?.phone ?? ''} onChange={(e) => store && setStore({ ...store, phone: e.target.value })} />
+                <div className="sm:col-span-2">
+                  <Input label={t('settings.address')} value={store?.address ?? ''} onChange={(e) => store && setStore({ ...store, address: e.target.value })} />
+                </div>
+                <Input label={t('settings.ntn')} value={store?.ntn ?? ''} onChange={(e) => store && setStore({ ...store, ntn: e.target.value })} />
+                <div>
+                  <Input label={t('settings.currency')} defaultValue="PKR (Rs.)" disabled />
+                  <p className="mt-1 flex items-center gap-1 text-xs text-brand-500">
+                    <MapPin className="h-3 w-3" /> {t('common.pakistan')}
+                  </p>
+                </div>
               </div>
-            </div>
-            <Button variant="accent" size="sm" className="mt-4">{t('settings.saveChanges')}</Button>
+              {storeMessage && <p role="status" className="mt-3 text-sm text-brand-600 dark:text-brand-300">{storeMessage}</p>}
+              <Button variant="accent" size="sm" className="mt-4" type="submit" loading={storeSaving} disabled={!store}>{t('settings.saveChanges')}</Button>
+            </form>
           </Card>
+          )}
+
+          {can('staff.manage') && <StaffCard />}
+          {isOwner && <RolesCard />}
 
           <Card hover>
             <CardHeader>
@@ -246,26 +170,6 @@ export default function SettingsPage() {
                 { value: 'dark', label: t('common.darkMode') },
               ]}
             />
-          </Card>
-
-          <Card hover>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Bell className="h-5 w-5" /> {t('settings.notifications')}
-              </CardTitle>
-            </CardHeader>
-            <div className="space-y-2">
-              {[
-                { label: t('settings.lowStockAlerts'), enabled: true },
-                { label: t('settings.dailySalesSummary'), enabled: true },
-                { label: t('settings.purchaseConfirmations'), enabled: false },
-              ].map((item) => (
-                <label key={item.label} className="flex cursor-pointer items-center justify-between rounded-xl border border-brand-100 p-4 transition-colors hover:bg-brand-50 dark:border-brand-800 dark:hover:bg-brand-800/30">
-                  <span className="text-sm font-medium">{item.label}</span>
-                  <input type="checkbox" defaultChecked={item.enabled} className="h-4 w-4 rounded accent-accent" />
-                </label>
-              ))}
-            </div>
           </Card>
 
           <Card hover>
@@ -318,78 +222,17 @@ export default function SettingsPage() {
             {backupMessage && (
               <p className="mt-3 text-sm text-brand-600 dark:text-brand-300">{backupMessage}</p>
             )}
-            {statusMessage && (
-              <p className="mt-3 text-sm text-brand-600 dark:text-brand-300">{statusMessage}</p>
-            )}
-            {updateInfo?.update_available && updateDismissed && !updateModalOpen && (
-              <div className="mt-3 flex flex-col gap-2 rounded-xl border border-accent/30 bg-accent/5 p-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-brand-700 dark:text-brand-200">
-                  {t('settings.updateAvailableBanner', {
-                    latest: updateInfo.latest_version,
-                  })}
-                </p>
-                <Button variant="accent" size="sm" onClick={() => setUpdateModalOpen(true)}>
-                  {t('settings.updateShowDetails')}
-                </Button>
-              </div>
-            )}
             <div className="mt-4 flex flex-wrap gap-3">
-              <Button variant="outline" size="sm" onClick={handleBackup} loading={backupLoading}>
-                {t('settings.backupDatabase')}
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => handleCheckUpdates()} loading={updateLoading}>
-                {t('settings.checkUpdates')}
-              </Button>
+              {can('backup.run') && (
+                <Button variant="outline" size="sm" onClick={handleBackup} loading={backupLoading}>
+                  {t('settings.backupDatabase')}
+                </Button>
+              )}
             </div>
           </Card>
         </div>
       </main>
 
-      <Modal
-        open={updateModalOpen}
-        onClose={handleDismissUpdate}
-        preventClose={updateApplying}
-        title={
-          updateApplying
-            ? t('settings.updateInstallingTitle')
-            : t('settings.updateAvailableTitle')
-        }
-        size="sm"
-        footer={
-          updateApplying ? undefined : (
-            <>
-              <Button variant="outline" onClick={handleDismissUpdate}>
-                {t('settings.updateLater')}
-              </Button>
-              <Button variant="accent" onClick={handleApplyUpdate}>
-                {t('settings.updateNow')}
-              </Button>
-            </>
-          )
-        }
-      >
-        {updateApplying ? (
-          <ProgressPanel
-            percent={updateProgress.percent}
-            label={updateProgress.message || t('settings.updateInstallingTitle')}
-            sublabel={t('settings.updateInstallingBody')}
-          />
-        ) : (
-          <>
-            <p className="text-sm text-brand-600 dark:text-brand-300">
-              {t('settings.updateAvailableBody', {
-                current: updateInfo?.current_version ?? appVersion,
-                latest: updateInfo?.latest_version ?? '',
-              })}
-            </p>
-            {updateInfo?.release_notes && (
-              <p className="mt-3 rounded-xl bg-brand-50 p-3 text-xs text-brand-500 dark:bg-brand-800/40">
-                {updateInfo.release_notes}
-              </p>
-            )}
-          </>
-        )}
-      </Modal>
     </>
   );
 }

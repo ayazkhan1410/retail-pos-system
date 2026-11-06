@@ -6,6 +6,7 @@ import type { SupplierFormData } from '@/store';
 
 const emptyForm: SupplierFormData = {
   name: '',
+  contactPerson: '',
   phone: '',
   email: '',
   address: '',
@@ -41,6 +42,7 @@ export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) 
     if (supplier) {
       setForm({
         name: supplier.name,
+        contactPerson: supplier.contactPerson ?? '',
         phone: supplier.phone,
         email: supplier.email,
         address: supplier.address,
@@ -138,6 +140,7 @@ export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) 
         label="Current Balance (PKR)"
         type="number"
         value={form.currentBalance}
+        disabled={!!supplier}
         onChange={(e) => handleChange('currentBalance', e.target.value)}
       />
       <Select

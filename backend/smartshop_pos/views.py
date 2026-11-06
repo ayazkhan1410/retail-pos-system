@@ -1,17 +1,20 @@
-from rest_framework.response import Response
+from django.db import DatabaseError, connection
 from rest_framework import status
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
 from rest_framework.views import APIView
 
 
 class HealthCheckView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
     def get(self, request):
         try:
-            return Response({
-                "status": "ok",
-                "message": "SmartShop POS is running"
-            }, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({
-                "status": "error",
-                "message": str(e),
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            connection.ensure_connection()
+        except DatabaseError:
+            return Response(
+                {"status": "error", "message": "Database is unavailable"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({"status": "ok", "message": "SmartShop POS is running"})

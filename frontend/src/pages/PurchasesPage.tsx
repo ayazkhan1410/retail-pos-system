@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Plus, Save, Trash2, Truck, X } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Badge, Button, Card, CardTitle, Input, Select } from '@/components/ui';
+import { Badge, Button, Card, CardTitle, Input, Select, confirmAction } from '@/components/ui';
 import { apiErrorMessage } from '@/services';
 import { purchasesApi, suppliersApi } from '@/services/endpoints';
 import { mapSupplierFromApi } from '@/services/suppliers';
@@ -149,8 +149,8 @@ export default function PurchasesPage() {
     return t('purchases.draftSaved');
   });
 
-  const post = () => {
-    if (!window.confirm(t('purchases.confirmPost'))) return;
+  const post = async () => {
+    if (!(await confirmAction({ title: t('purchases.confirmPost') }))) return;
     void run(async () => {
       const id = await save();
       const { data } = await purchasesApi.post(id!);
@@ -161,9 +161,9 @@ export default function PurchasesPage() {
     });
   };
 
-  const voidPosted = () => {
+  const voidPosted = async () => {
     if (!grn.id || grn.status !== 'posted') return;
-    if (!window.confirm(t('purchases.confirmVoid'))) return;
+    if (!(await confirmAction({ title: t('purchases.confirmVoid'), tone: 'danger' }))) return;
     void run(async () => {
       const { data } = await purchasesApi.void(grn.id!, t('purchases.voidDefaultReason'));
       setGrn(data);
@@ -173,8 +173,8 @@ export default function PurchasesPage() {
     });
   };
 
-  const removeDraft = () => {
-    if (!grn.id || !window.confirm(t('purchases.confirmDelete'))) return;
+  const removeDraft = async () => {
+    if (!grn.id || !(await confirmAction({ title: t('purchases.confirmDelete'), tone: 'danger' }))) return;
     void run(async () => {
       await purchasesApi.remove(grn.id!);
       setGrn(emptyGrn());
@@ -303,7 +303,7 @@ export default function PurchasesPage() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1150px] text-xs">
               <thead>
-                <tr className="bg-brand-50/80 text-left font-semibold uppercase tracking-wider text-brand-500 dark:bg-brand-800/40">
+                <tr className="bg-brand-50/80 text-left font-medium text-brand-500 dark:bg-brand-800/40">
                   <th className="px-2 py-2">{t('purchases.product')}</th>
                   {LINE_NUMBERS.map(([key, label]) => <th key={key} className="px-1 py-2 text-right">{t(label)}</th>)}
                   <th className="px-2 py-2 text-right">{t('purchases.cost')}</th>
@@ -390,9 +390,9 @@ export default function PurchasesPage() {
               {Number(shown?.discount) > 0 && <div className="flex justify-between text-emerald-600"><span>{t('purchases.discount')}</span><span>-{formatCurrency(Number(shown?.discount))}</span></div>}
               {Number(shown?.tax) > 0 && <div className="flex justify-between"><span>{t('purchases.salesTax')}</span><span>+{formatCurrency(Number(shown?.tax))}</span></div>}
             </div>
-            <div className="mt-4 rounded-xl border-2 border-amber-400/60 bg-amber-100/80 p-4 dark:bg-amber-950/30">
-              <p className="text-sm font-medium text-brand-600 dark:text-brand-300">{t('purchases.grandTotal')}</p>
-              <p className="font-display text-3xl font-bold" data-testid="grn-total">{formatCurrency(Number(shown?.total ?? 0))}</p>
+            <div className="mt-4 rounded-xl bg-brand-900 p-4 text-white dark:bg-brand-800">
+              <p className="text-sm font-medium text-brand-300">{t('purchases.grandTotal')}</p>
+              <p className="num mt-1 text-[32px] font-semibold leading-none" data-testid="grn-total">{formatCurrency(Number(shown?.total ?? 0))}</p>
             </div>
           </Card>
         </div>

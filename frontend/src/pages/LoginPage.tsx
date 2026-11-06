@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Languages, ShieldCheck, Store, WifiOff } from 'lucide-react';
-import { Button, Input } from '@/components/ui';
+import { Eye, EyeOff, Languages, ShieldCheck, WifiOff } from 'lucide-react';
+import { Button, Input, BrandLogo } from '@/components/ui';
 import LanguageToggle from '@/components/layout/LanguageToggle';
 import { apiErrorMessage } from '@/services';
 import { homePath, useAuthStore } from '@/store';
@@ -38,65 +38,16 @@ export default function LoginPage() {
   ];
 
   return (
-    <main className="grid min-h-[100dvh] bg-brand-50 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] dark:bg-brand-950">
-      {/* Brand panel */}
-      <section className="relative hidden flex-col justify-between overflow-hidden bg-ink p-10 text-white lg:flex xl:p-14">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white text-ink">
-            <Store className="h-5 w-5" strokeWidth={2.25} />
-          </div>
-          <div className="leading-tight">
-            <p className="text-base font-semibold tracking-tight">SmartShop</p>
-            <p className="text-xs text-ink-muted">{t('nav.pointOfSale')}</p>
-          </div>
-        </div>
-
-        <div className="max-w-md">
-          <h2 className="text-3xl font-semibold leading-tight tracking-tight xl:text-[2.5rem] xl:leading-[1.1]">
-            {t('auth.panelTitle')}
-          </h2>
-          <ul className="mt-8 space-y-4">
-            {features.map(({ icon: Icon, text }) => (
-              <li key={text} className="flex items-start gap-3 text-sm text-white/80">
-                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white/10 text-accent-glow">
-                  <Icon className="h-4 w-4" />
-                </span>
-                <span className="pt-1">{text}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Receipt tear: the till's signature edge, used once here. */}
-        <div aria-hidden className="pointer-events-none absolute -bottom-6 end-10 w-56 rotate-[-4deg] rounded-t-lg bg-white/[0.06] px-5 pb-10 pt-5">
-          {[72, 54, 64, 40].map((width, index) => (
-            <div key={index} className="mb-3 flex justify-between gap-4">
-              <span className="h-2 rounded-full bg-white/15" style={{ width: `${width}%` }} />
-              <span className="h-2 w-8 rounded-full bg-white/15" />
-            </div>
-          ))}
-          <div className="mt-5 flex justify-between border-t border-dashed border-white/15 pt-4">
-            <span className="h-2.5 w-14 rounded-full bg-accent-glow/50" />
-            <span className="h-2.5 w-16 rounded-full bg-accent-glow/50" />
-          </div>
-        </div>
-      </section>
-
-      {/* Form */}
-      <section className="flex flex-col px-5 py-6 sm:px-10">
+    <main className="grid min-h-[100dvh] bg-white lg:grid-cols-2 dark:bg-brand-950">
+      <section className="flex flex-col px-6 py-6 sm:px-12 lg:px-14">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5 lg:invisible">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-ink text-white">
-              <Store className="h-[18px] w-[18px]" />
-            </div>
-            <span className="text-[15px] font-semibold tracking-tight">SmartShop</span>
-          </div>
+          <BrandLogo className="text-[22px]" markSize={30} />
           <LanguageToggle compact />
         </div>
 
         <div className="flex flex-1 items-center justify-center py-10">
-          <div className="w-full max-w-sm">
-            <h1 className="text-2xl font-semibold tracking-tight">{t('auth.title')}</h1>
+          <div className="w-full max-w-[360px]">
+            <h1 className="text-[26px] font-semibold tracking-tight">{t('auth.title')}</h1>
             <p className="mt-1.5 text-sm text-brand-500 dark:text-brand-400">{t('auth.subtitle')}</p>
 
             <form onSubmit={submit} className="mt-8 space-y-4">
@@ -110,7 +61,7 @@ export default function LoginPage() {
                 autoFocus
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="h-11"
+                className="h-10"
               />
               <div className="relative">
                 <Input
@@ -121,14 +72,14 @@ export default function LoginPage() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="h-11 pe-11"
+                  className="h-10 pe-11"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((value) => !value)}
                   aria-label={showPassword ? t('auth.hidePassword') : t('auth.showPassword')}
                   aria-pressed={showPassword}
-                  className="absolute bottom-1.5 end-1.5 flex h-8 w-8 items-center justify-center rounded-md text-brand-400 hover:bg-brand-100 hover:text-brand-700 focus-ring dark:hover:bg-brand-800"
+                  className="absolute bottom-1 end-1 flex h-8 w-8 items-center justify-center rounded-md text-brand-400 hover:bg-brand-100 hover:text-brand-700 focus-ring dark:hover:bg-brand-800"
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -138,9 +89,28 @@ export default function LoginPage() {
                   {error}
                 </p>
               )}
-              <Button variant="accent" size="lg" type="submit" className="w-full" loading={loading}>{t('auth.signIn')}</Button>
+              <Button variant="primary" size="lg" type="submit" className="!h-11 w-full" loading={loading}>{t('auth.signIn')}</Button>
             </form>
           </div>
+        </div>
+
+        <p className="text-xs text-brand-400">© {new Date().getFullYear()} Tijori POS</p>
+      </section>
+
+      <section className="relative hidden items-center justify-center overflow-hidden border-s border-brand-200 bg-brand-50 p-14 lg:flex dark:border-brand-800 dark:bg-[#0f1013]">
+        <div className="w-full max-w-[480px]">
+          <h2 className="text-[40px] font-semibold leading-[1.12] tracking-tight">{t('auth.tagline')}</h2>
+          <p className="mt-4 max-w-md text-base text-brand-600 dark:text-brand-400">{t('auth.panelTitle')}</p>
+          <ul className="mt-10 space-y-3">
+            {features.map(({ icon: Icon, text }) => (
+              <li key={text} className="flex items-start gap-3 rounded-xl border border-brand-200 bg-white p-4 shadow-card dark:border-brand-800 dark:bg-brand-900">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span className="pt-1.5 text-sm text-brand-700 dark:text-brand-300">{text}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
     </main>

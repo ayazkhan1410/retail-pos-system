@@ -95,9 +95,9 @@ export default function CashQuickModal({
       }
     >
       <form id="cash-quick-form" onSubmit={(e) => submit(false, e)} className="space-y-4">
-        <div className="rounded-2xl bg-brand-50 p-4 text-center dark:bg-brand-800/40">
-          <p className="text-xs font-medium uppercase tracking-wide text-brand-500">{t('pos.amountDue')}</p>
-          <p className="font-display text-4xl font-bold tabular-nums" data-testid="amount-due">
+        <div className="flex items-baseline justify-between gap-3 rounded-xl bg-brand-50 px-4 py-3 dark:bg-brand-800/50">
+          <p className="text-sm font-medium text-brand-500">{t('pos.amountDue')}</p>
+          <p className="num text-3xl font-semibold" data-testid="amount-due">
             {formatCurrency(due)}
           </p>
         </div>
@@ -113,14 +113,14 @@ export default function CashQuickModal({
           placeholder={due.toFixed(2)}
           value={tendered}
           onChange={(e) => setTendered(e.target.value)}
-          className="!h-14 text-center text-2xl font-bold tabular-nums"
+          className="!h-14 text-center text-2xl font-semibold tabular-nums"
         />
 
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={() => setTendered(due.toFixed(2))}
-            className="rounded-xl border border-brand-200 px-3 py-2 text-sm font-semibold hover:bg-brand-50 dark:border-brand-700 dark:hover:bg-brand-800"
+            className="h-10 rounded-lg border border-brand-200 px-3 text-sm font-medium hover:bg-brand-50 dark:border-brand-700 dark:hover:bg-brand-800"
           >
             {t('pos.exactCash')}
           </button>
@@ -130,8 +130,8 @@ export default function CashQuickModal({
               type="button"
               onClick={() => setTendered(String(note))}
               className={cn(
-                'rounded-xl border border-brand-200 px-3 py-2 text-sm font-semibold tabular-nums hover:bg-brand-50 dark:border-brand-700 dark:hover:bg-brand-800',
-                Number(tendered) === note && 'border-accent bg-accent/10 text-accent',
+                'h-10 rounded-lg border border-brand-200 px-3 text-sm font-medium tabular-nums hover:bg-brand-50 dark:border-brand-700 dark:hover:bg-brand-800',
+                Number(tendered) === note && 'border-accent bg-accent-soft text-accent',
               )}
             >
               {formatCurrency(note)}
@@ -139,13 +139,13 @@ export default function CashQuickModal({
           ))}
         </div>
 
-        <div className="rounded-2xl border-2 border-emerald-500/40 bg-emerald-500/5 px-3 py-5 text-center dark:border-emerald-500/30 sm:px-5">
+        <div className="rounded-xl bg-emerald-50 px-3 py-5 text-center sm:px-5 dark:bg-emerald-500/10">
           {short > 0 ? (
             <>
               <p className="text-sm font-medium text-red-600">{t('pos.remaining')}</p>
               <p
                 dir="ltr"
-                className="font-display font-black leading-none tabular-nums text-red-600"
+                className="num font-semibold leading-none text-red-600 dark:text-red-400"
                 style={{ fontSize: 'clamp(2rem, 8vw, 3.5rem)' }}
               >
                 {formatCurrency(short)}
@@ -153,10 +153,10 @@ export default function CashQuickModal({
             </>
           ) : (
             <>
-              <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">{t('pos.changeDue')}</p>
+              <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">{t('pos.changeDue')}</p>
               <p
                 dir="ltr"
-                className="mt-1 font-display font-black leading-none tabular-nums text-emerald-500"
+                className="num mt-1 font-semibold leading-none text-emerald-700 dark:text-emerald-300"
                 style={{ fontSize: 'clamp(2.25rem, 9vw, 4rem)' }}
                 data-testid="change-preview"
               >
@@ -166,7 +166,7 @@ export default function CashQuickModal({
           )}
         </div>
 
-        {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+        {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{error}</p>}
         <p className="text-center text-[11px] text-brand-400">{t('pos.cashQuickHint')}</p>
       </form>
     </Modal>

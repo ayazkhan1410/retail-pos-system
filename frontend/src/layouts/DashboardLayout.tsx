@@ -30,7 +30,7 @@ export default function DashboardLayout() {
   }, [mobileSidebarOpen, setMobileSidebarOpen]);
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-brand-50 dark:bg-brand-950">
+    <div className="flex h-[100dvh] overflow-hidden bg-white dark:bg-brand-950">
       {/* Desktop sidebar */}
       <div className="hidden shrink-0 lg:block">
         <Sidebar />

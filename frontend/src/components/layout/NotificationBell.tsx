@@ -141,7 +141,7 @@ export default function NotificationBell() {
       >
         <Bell className={cn('h-4 w-4', unreadCount > 0 && 'animate-[pulse_2s_ease-in-out_infinite]')} />
         {unreadCount > 0 && (
-          <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-rose-600 px-1 text-[10px] font-bold text-white shadow-md ring-2 ring-white dark:ring-brand-950">
+          <span className="absolute -right-1.5 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white ring-2 ring-white dark:ring-brand-950">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
@@ -150,7 +150,6 @@ export default function NotificationBell() {
       {open && (
         <div className="absolute right-0 z-50 mt-2 w-[min(24rem,calc(100vw-1.5rem))] origin-top-right overflow-hidden rounded-2xl border border-brand-200/80 bg-white/95 shadow-elevated backdrop-blur-xl dark:border-brand-700/80 dark:bg-brand-900/95">
           <div className="relative overflow-hidden border-b border-brand-100/80 px-4 py-3 dark:border-brand-800/80">
-            <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-accent/10 via-transparent to-transparent" />
             <div className="relative flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -222,7 +221,7 @@ export default function NotificationBell() {
                     'group relative flex w-full gap-3 rounded-xl px-3 py-3 text-left transition-all',
                     'hover:bg-brand-50/90 dark:hover:bg-brand-800/50',
                     unread
-                      ? 'bg-gradient-to-r from-accent/[0.07] to-transparent ring-1 ring-accent/15'
+                      ? 'bg-accent-soft/60'
                       : 'bg-transparent',
                   )}
                 >

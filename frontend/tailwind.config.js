@@ -13,44 +13,44 @@ export default {
         '2xs': ['0.6875rem', { lineHeight: '1rem' }],
       },
       colors: {
-        // Neutral scale with a faint green cast, so greys sit with the brand green instead of against it.
+        // Neutral greys from the approved Tijori design (cool, no colour cast).
         brand: {
-          50: '#f5f7f6',
-          100: '#eef2f0',
-          200: '#dfe5e2',
-          300: '#c6cfca',
-          400: '#94a19a',
-          500: '#67746d',
-          600: '#4c5852',
-          700: '#37423c',
-          800: '#232c27',
-          900: '#161d19',
-          950: '#0c120e',
+          50: '#f7f7f8',
+          100: '#f1f1f3',
+          200: '#e6e6ea',
+          300: '#d3d4d9',
+          400: '#9a9ea6',
+          500: '#6b7079',
+          600: '#4b4f57',
+          700: '#3f434a',
+          800: '#23252a',
+          900: '#0f1115',
+          950: '#0b0c0e',
         },
-        // Pakistan flag green. Defined as variables so dark mode can lift it to a readable shade.
+        // Tijori indigo. Variables so dark mode can lift it to a readable shade.
         accent: {
           DEFAULT: 'rgb(var(--accent) / <alpha-value>)',
           light: 'rgb(var(--accent-light) / <alpha-value>)',
           glow: 'rgb(var(--accent-glow) / <alpha-value>)',
           soft: 'rgb(var(--accent-soft) / <alpha-value>)',
         },
-        // Sidebar and other deep brand surfaces.
+        // Near-black surfaces (kept for older markup; new markup uses brand-900).
         ink: {
-          DEFAULT: '#062b18',
-          soft: '#0b3a22',
-          muted: '#8fb3a0',
+          DEFAULT: '#0f1115',
+          soft: '#1a1c20',
+          muted: '#9a9ea6',
         },
       },
       borderRadius: {
         DEFAULT: '0.375rem',
       },
       boxShadow: {
-        soft: '0 1px 2px 0 rgb(16 29 22 / 0.05)',
-        card: '0 1px 2px 0 rgb(16 29 22 / 0.04)',
-        elevated: '0 16px 40px -12px rgb(16 29 22 / 0.22), 0 2px 6px -2px rgb(16 29 22 / 0.08)',
-        glow: '0 6px 16px -6px rgb(1 65 28 / 0.55)',
+        soft: '0 1px 2px 0 rgb(16 17 20 / 0.05)',
+        card: '0 1px 2px 0 rgb(16 17 20 / 0.04)',
+        elevated: '0 16px 40px -12px rgb(16 17 20 / 0.22), 0 2px 6px -2px rgb(16 17 20 / 0.08)',
+        glow: '0 1px 2px 0 rgb(16 17 20 / 0.10)',
         'pos-glow': '0 0 0 1px rgb(255 255 255 / 0.06)',
-        receipt: '0 1px 0 rgb(16 29 22 / 0.04), 0 10px 30px -14px rgb(16 29 22 / 0.25)',
+        receipt: '0 0 0 1px rgb(16 17 20 / 0.06), 0 1px 2px 0 rgb(16 17 20 / 0.05)',
       },
       animation: {
         'pulse-soft': 'pulse-soft 2s ease-in-out infinite',

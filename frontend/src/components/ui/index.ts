@@ -8,3 +8,5 @@ export { default as Select } from './Select';
 export { EmptyState, ErrorState, Skeleton, SkeletonRows } from './Feedback';
 export { ConfirmHost, confirmAction, useConfirmStore } from './ConfirmDialog';
 export { ToastHost, toast } from './Toast';
+export { BrandMark, BrandWordmark, BrandUrdu, BrandLogo } from './Brand';
+export { default as StatStrip, type StatItem } from './StatStrip';

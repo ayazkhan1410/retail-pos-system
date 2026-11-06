@@ -5,11 +5,13 @@ import { fieldClass, labelClass } from './Input';
 interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   label?: string;
   options: { value: string; label: string }[];
+  /** Width or layout for the label + field wrapper; `className` styles the select itself. */
+  containerClassName?: string;
 }
 
-export default function Select({ label, options, className, id, ...props }: SelectProps) {
+export default function Select({ label, options, className, containerClassName, id, ...props }: SelectProps) {
   return (
-    <div className="w-full">
+    <div className={cn('w-full', containerClassName)}>
       {label && (
         <label htmlFor={id} className={labelClass}>
           {label}

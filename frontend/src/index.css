@@ -4,18 +4,18 @@
 
 @layer base {
   :root {
-    --accent: 1 65 28;
-    --accent-light: 10 92 47;
-    --accent-glow: 34 160 95;
-    --accent-soft: 230 241 235;
+    --accent: 99 91 255;
+    --accent-light: 82 73 240;
+    --accent-glow: 99 91 255;
+    --accent-soft: 239 238 255;
     color-scheme: light;
   }
 
   .dark {
-    --accent: 31 138 77;
-    --accent-light: 40 160 92;
-    --accent-glow: 86 205 138;
-    --accent-soft: 18 46 31;
+    --accent: 138 132 255;
+    --accent-light: 160 155 255;
+    --accent-glow: 160 155 255;
+    --accent-soft: 34 32 64;
     color-scheme: dark;
   }
 
@@ -28,8 +28,8 @@
   }
 
   body {
-    @apply bg-brand-50 text-brand-900 antialiased dark:bg-brand-950 dark:text-brand-50;
-    font-feature-settings: 'cv11', 'ss03';
+    @apply bg-white text-brand-900 antialiased dark:bg-brand-950 dark:text-brand-50;
+    font-feature-settings: 'cv11', 'ss01', 'tnum';
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
 
@@ -67,7 +67,7 @@
   }
 
   .page-bg {
-    @apply bg-brand-50 dark:bg-brand-950;
+    @apply bg-white dark:bg-brand-950;
   }
 
   .gradient-border {

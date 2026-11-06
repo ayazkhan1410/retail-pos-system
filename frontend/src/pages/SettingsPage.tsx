@@ -118,7 +118,7 @@ export default function SettingsPage() {
                   { value: 'en', label: t('common.english') },
                   { value: 'ur', label: t('common.urdu') },
                 ]}
-                className="max-w-xs"
+                containerClassName="max-w-xs"
               />
             </div>
           </Card>

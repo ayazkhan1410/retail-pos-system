@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Search, Download, Eye, Printer, Receipt, Undo2 } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Card, Button, Input, Select, Badge, Modal, EmptyState } from '@/components/ui';
+import { Card, Button, Input, Select, Badge, Modal, EmptyState, StatStrip } from '@/components/ui';
 import { salesApi } from '@/services/endpoints';
 import { useTranslation } from '@/i18n';
 import { useCan } from '@/store';
@@ -115,20 +115,14 @@ export default function SalesPage() {
       />
 
       <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-        <div className="mb-6 grid gap-4 sm:grid-cols-3">
-          {[
-            { label: t('sales.totalRevenue'), value: formatCurrency(revenue), sub: t('common.pkr') },
-            { label: t('sales.invoices'), value: String(count), sub: t('sales.completed') },
-            { label: t('sales.avgBill'), value: formatCurrency(count ? Math.round((revenue / count) * 100) / 100 : 0), sub: t('sales.perInvoice') },
-          ].map((s) => (
-            <Card key={s.label} hover className="relative overflow-hidden">
-              <div className="absolute -right-4 -top-4 h-20 w-20 rounded-full bg-accent/5" />
-              <p className="text-sm text-brand-500">{s.label}</p>
-              <p className="mt-1 font-display text-2xl font-bold">{s.value}</p>
-              <p className="mt-0.5 text-xs text-brand-400">{s.sub}</p>
-            </Card>
-          ))}
-        </div>
+        <StatStrip
+          className="mb-6"
+          items={[
+            { key: 'revenue', label: t('sales.totalRevenue'), value: formatCurrency(revenue), hint: t('common.pkr') },
+            { key: 'count', label: t('sales.invoices'), value: String(count), hint: t('sales.completed') },
+            { key: 'avg', label: t('sales.avgBill'), value: formatCurrency(count ? Math.round((revenue / count) * 100) / 100 : 0), hint: t('sales.perInvoice') },
+          ]}
+        />
 
         <Card padding="none" hover>
           <div className="grid gap-3 border-b border-brand-100 p-4 sm:grid-cols-2 lg:grid-cols-4 dark:border-brand-800">

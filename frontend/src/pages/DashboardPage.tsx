@@ -13,6 +13,10 @@ import {
   Trophy,
   PackageCheck,
   BarChart3,
+  Package,
+  Receipt,
+  Truck,
+  Users,
 } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
 import { Card, CardHeader, CardTitle, CardDescription, Badge, EmptyState, ErrorState, Skeleton } from '@/components/ui';
@@ -65,12 +69,39 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [failed, setFailed] = useState(false);
 
-  const load = useCallback(() => {
-    setFailed(false);
-    salesApi.dashboard().then((response) => setData(response.data)).catch(() => setFailed(true));
+  const load = useCallback((opts?: { soft?: boolean }) => {
+    if (!opts?.soft) setFailed(false);
+    salesApi.dashboard()
+      .then((response) => {
+        setData(response.data);
+        setFailed(false);
+      })
+      .catch(() => {
+        if (!opts?.soft) setFailed(true);
+      });
   }, []);
 
-  useEffect(load, [load]);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Soft refresh while this page is open so till sales/purchases appear without a manual reload.
+  // (SSE covers stock alerts in the bell; activity is audit-backed.)
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === 'hidden') return;
+      load({ soft: true });
+    };
+    const id = window.setInterval(tick, 8000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tick();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [load]);
 
   const hour = new Date().getHours();
   const subtitle =
@@ -118,6 +149,10 @@ export default function DashboardPage() {
   const change = yesterday > 0 ? Math.round(((revenue - yesterday) / yesterday) * 1000) / 10 : 0;
   const averageBasket = data.today_count > 0 ? Math.round((revenue / data.today_count) * 100) / 100 : 0;
   const attentionCount = data.stock.low + data.stock.out;
+  const returnsAmount = Number(data.today_returns_amount ?? 0);
+  const returnsCount = data.today_returns_count ?? 0;
+  const khataOutstanding = Number(data.khata_outstanding ?? 0);
+  const registers = data.registers ?? [];
 
   const chartRows = data.sales_by_day.map((row) => ({
     day: row.day,
@@ -128,7 +163,6 @@ export default function DashboardPage() {
     total: data.counters.reduce((sum, name) => sum + Number(row[name] ?? 0), 0),
   }));
   const hasWeekSales = dayTotals.some((row) => row.total > 0);
-  const weekTotal = dayTotals.reduce((sum, row) => sum + row.total, 0);
 
   const paymentTotal = data.payment_methods.reduce((sum, row) => sum + Number(row.amount), 0);
   const paymentRows = [...data.payment_methods]
@@ -142,15 +176,44 @@ export default function DashboardPage() {
   const noData = t('dashboard.noData');
   const TrendIcon = change >= 0 ? ArrowUpRight : ArrowDownRight;
 
+  const quickActions = [
+    { perm: 'pos.sell', to: '/pos', icon: ShoppingCart, label: t('dashboard.quickPos') },
+    { perm: 'products.edit', to: '/inventory', icon: Package, label: t('dashboard.quickInventory') },
+    { perm: 'sales.view', to: '/sales', icon: Receipt, label: t('dashboard.quickSales') },
+    { perm: 'purchases.view', to: '/purchases', icon: Truck, label: t('dashboard.quickPurchases') },
+    { perm: 'customers.view', to: '/customers', icon: Users, label: t('dashboard.quickCustomers') },
+    { perm: 'reports.view', to: '/reports', icon: BarChart3, label: t('dashboard.quickReports') },
+  ].filter((action) => can(action.perm));
+
   return (
     <>
       {header}
 
       <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
         <div className="mx-auto max-w-[1440px] space-y-4 sm:space-y-6">
-          {/* Today at a glance: one strip, the numbers an owner checks first */}
-          <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-brand-200 bg-white md:grid-cols-3 xl:grid-cols-5 dark:border-brand-800 dark:bg-brand-900">
-            <div className="col-span-2 border-b border-brand-200 p-5 md:col-span-1 md:border-e xl:border-b-0 dark:border-brand-800">
+          {quickActions.length > 0 && (
+            <section aria-label={t('dashboard.quickActions')}>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-brand-400">{t('dashboard.quickActions')}</p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                {quickActions.map(({ to, icon: Icon, label }) => (
+                  <Link
+                    key={to}
+                    to={to}
+                    className="flex items-center gap-2.5 rounded-xl border border-brand-200 bg-white px-3.5 py-3 text-sm font-medium text-brand-800 shadow-card transition-colors hover:border-accent/40 hover:bg-accent-soft focus-ring dark:border-brand-800 dark:bg-brand-900 dark:text-brand-100 dark:hover:bg-brand-800/60"
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <span className="truncate">{label}</span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Today at a glance */}
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-xl border border-brand-200 bg-white p-5 dark:border-brand-800 dark:bg-brand-900">
               <p className="text-sm font-medium text-brand-500 dark:text-brand-400">{t('dashboard.kpiTodaySales')}</p>
               <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2">
                 <span className="num text-[26px] font-semibold leading-tight">{formatCurrency(revenue)}</span>
@@ -166,8 +229,25 @@ export default function DashboardPage() {
               </p>
             </div>
             {[
-              { label: t('dashboard.kpiTransactions'), value: String(data.today_count), sub: t('dashboard.salesLabel') },
-              { label: t('dashboard.avgBasket'), value: formatCurrency(averageBasket), sub: `${t('dashboard.last7Days')} ${formatCurrency(weekTotal)}` },
+              { label: t('dashboard.kpiTransactions'), value: String(data.today_count), sub: t('dashboard.avgBasket') + ' ' + formatCurrency(averageBasket) },
+              {
+                label: t('dashboard.kpiReturns'),
+                value: String(returnsCount),
+                sub: formatCurrency(returnsAmount),
+                warn: returnsCount > 0,
+              },
+              {
+                label: t('dashboard.kpiCustomers'),
+                value: String((data.customers_identified ?? 0) + (data.customers_walk_in ?? 0)),
+                sub: `${t('dashboard.identifiedToday', { count: data.customers_identified ?? 0 })} · ${t('dashboard.walkIns', { count: data.customers_walk_in ?? 0 })}`,
+              },
+              {
+                label: t('dashboard.kpiKhata'),
+                value: formatCurrency(khataOutstanding),
+                sub: t('dashboard.salesCount', { count: data.khata_customers ?? 0 }),
+                warn: khataOutstanding > 0,
+                to: can('customers.view') ? '/customers' : undefined,
+              },
               {
                 label: t('dashboard.kpiLowStock'),
                 value: String(attentionCount),
@@ -175,33 +255,16 @@ export default function DashboardPage() {
                 warn: attentionCount > 0,
                 to: can('products.edit') ? '/inventory' : undefined,
               },
-              { label: t('dashboard.kpiActiveCounters'), value: `${data.open_counters} / ${data.total_counters}`, counters: true },
-            ].map((cell, index) => {
+              { label: t('dashboard.kpiActiveCounters'), value: `${data.open_counters} / ${data.total_counters}`, sub: t('dashboard.registers') },
+            ].map((cell) => {
               const content = (
                 <>
                   <p className="text-sm font-medium text-brand-500 dark:text-brand-400">{cell.label}</p>
                   <p className={cn('num mt-1.5 text-[26px] font-semibold leading-tight', cell.warn && 'text-amber-700 dark:text-amber-300')}>{cell.value}</p>
-                  {cell.counters ? (
-                    <span className="mt-3 flex items-center gap-1" aria-hidden>
-                      {Array.from({ length: data.total_counters }, (_, i) => (
-                        <span key={i} className={cn('h-1.5 w-5 rounded-full', i < data.open_counters ? 'bg-emerald-500' : 'bg-brand-200 dark:bg-brand-700')} />
-                      ))}
-                    </span>
-                  ) : (
-                    <p className="mt-2 truncate text-xs text-brand-400">{cell.sub}</p>
-                  )}
+                  <p className="mt-2 truncate text-xs text-brand-400">{cell.sub}</p>
                 </>
               );
-              const shell = cn(
-                'block p-5 dark:border-brand-800',
-                index < 3 && 'xl:border-e',
-                index % 2 === 0 && 'border-e md:border-e-0',
-                index < 2 && 'border-b md:border-b-0',
-                index === 0 && 'md:border-e',
-                index === 1 && 'md:border-e-0 xl:border-e',
-                index === 2 && 'md:border-b-0 md:border-e md:border-t xl:border-t-0',
-                index === 3 && 'md:border-t xl:border-t-0',
-              );
+              const shell = 'rounded-xl border border-brand-200 bg-white p-5 dark:border-brand-800 dark:bg-brand-900';
               return cell.to ? (
                 <Link key={cell.label} to={cell.to} className={cn(shell, 'transition-colors hover:bg-brand-50 focus-ring dark:hover:bg-brand-800/40')}>{content}</Link>
               ) : (
@@ -209,6 +272,28 @@ export default function DashboardPage() {
               );
             })}
           </div>
+
+          {registers.length > 0 && (
+            <Card hover>
+              <CardHeader><CardTitle>{t('dashboard.registers')}</CardTitle></CardHeader>
+              <div className="divide-y divide-brand-100 dark:divide-brand-800">
+                {registers.map((register) => (
+                  <div key={register.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                    <div className="min-w-0">
+                      <p className="font-medium">{register.name}</p>
+                      <p className="truncate text-xs text-brand-500">{register.cashier || '—'}</p>
+                    </div>
+                    <div className="text-end">
+                      <Badge variant={register.status === 'open' ? 'success' : 'default'}>
+                        {register.status === 'open' ? t('dashboard.registerOpen') : t('dashboard.registerClosed')}
+                      </Badge>
+                      <p className="mt-1 tabular-nums font-semibold">{formatCurrency(Number(register.sales_total))}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
 
           {/* Week by counter + what sold */}
           <div className="grid gap-4 sm:gap-6 lg:grid-cols-3">
@@ -411,20 +496,33 @@ export default function DashboardPage() {
                 <EmptyState title={noData} compact />
               ) : (
                 <ol className="relative space-y-4 before:absolute before:inset-y-1 before:start-[5px] before:w-px before:bg-brand-200 dark:before:bg-brand-800">
-                  {data.recent_activity.map((item) => (
-                    <li key={item.id} className="relative flex gap-3 ps-5">
-                      <span aria-hidden className="absolute start-0 top-1.5 h-[11px] w-[11px] rounded-full border-2 border-white bg-brand-300 dark:border-brand-900 dark:bg-brand-600" />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium">
-                          {t(`dashboard.activity.${item.action}`)}
-                          {item.target && <span className="font-normal text-brand-500"> · {item.target}</span>}
-                        </p>
-                        <p className="text-xs text-brand-500">
-                          {item.user} · <span className="tabular-nums">{formatDate(item.created_at)}</span>
-                        </p>
-                      </div>
-                    </li>
-                  ))}
+                  {data.recent_activity.map((item) => {
+                    const total = item.details?.total != null ? Number(item.details.total) : null;
+                    const isSale = item.action === 'sale_completed' || item.action === 'offline_sale';
+                    return (
+                      <li key={item.id} className="relative flex gap-3 ps-5">
+                        <span
+                          aria-hidden
+                          className={cn(
+                            'absolute start-0 top-1.5 h-[11px] w-[11px] rounded-full border-2 border-white dark:border-brand-900',
+                            isSale ? 'bg-emerald-500' : 'bg-brand-300 dark:bg-brand-600',
+                          )}
+                        />
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {t(`dashboard.activity.${item.action}`)}
+                            {item.target && <span className="font-normal text-brand-500"> · {item.target}</span>}
+                            {total != null && Number.isFinite(total) && (
+                              <span className="font-semibold text-brand-800 dark:text-brand-100"> · {formatCurrency(total)}</span>
+                            )}
+                          </p>
+                          <p className="text-xs text-brand-500">
+                            {item.user} · <span className="tabular-nums">{formatDate(item.created_at)}</span>
+                          </p>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ol>
               )}
             </Card>

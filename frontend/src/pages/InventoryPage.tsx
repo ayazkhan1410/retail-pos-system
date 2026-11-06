@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, Search, Pencil, Trash2, AlertTriangle, Filter, X, Printer, Scale, Upload, Ban } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
 import { Card, Button, Input, Badge, StockBadge, Modal, Select, StatStrip, confirmAction, type StatItem } from '@/components/ui';
-import { formatCurrency } from '@/utils';
+import { useInfiniteScroll } from '@/hooks/useInfiniteScroll';
+import { cn, formatCurrency } from '@/utils';
 import {
   emptyInventoryFilters,
   filterProducts,
@@ -11,6 +12,8 @@ import {
   deriveStockStatus,
   formatDateOnly,
   getExpiryStatus,
+  productMarginPercent,
+  stockFillPercent,
   type InventoryFilters,
   type StockFilter,
   type ExpiryFilter,
@@ -53,7 +56,7 @@ export default function InventoryPage() {
   const importInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    void fetchProducts();
+    void fetchProducts({ includeInactive: true });
   }, [fetchProducts]);
   const [filters, setFilters] = useState<InventoryFilters>(() => {
     const q = searchParams.get('q')?.trim() ?? '';
@@ -71,6 +74,18 @@ export default function InventoryPage() {
 
   const stats = useMemo(() => countByStockStatus(products), [products]);
   const filtered = useMemo(() => filterProducts(products, filters), [products, filters]);
+  const ROW_CHUNK = 50;
+  const [visibleRows, setVisibleRows] = useState(ROW_CHUNK);
+  useEffect(() => {
+    setVisibleRows(ROW_CHUNK);
+  }, [filters, products.length]);
+  const visibleProducts = useMemo(() => filtered.slice(0, visibleRows), [filtered, visibleRows]);
+  const hasMoreRows = visibleRows < filtered.length;
+  const revealMoreRows = useCallback(() => {
+    if (!hasMoreRows) return;
+    setVisibleRows((count) => Math.min(count + ROW_CHUNK, filtered.length));
+  }, [hasMoreRows, filtered.length]);
+  const rowSentinelRef = useInfiniteScroll(hasMoreRows, revealMoreRows);
   const categories = useMemo(
     () => ['all', ...Array.from(new Set(products.map((p) => p.category)))],
     [products],
@@ -86,6 +101,7 @@ export default function InventoryPage() {
     filters.search ||
     filters.stockStatus !== 'all' ||
     filters.expiryFilter !== 'all' ||
+    filters.activity !== 'active' ||
     filters.category !== 'all' ||
     filters.expiryFrom ||
     filters.expiryTo;
@@ -93,7 +109,8 @@ export default function InventoryPage() {
   const applyStockQuickFilter = (status: StockFilter) => {
     setFilters((prev) => ({
       ...prev,
-      stockStatus: prev.stockStatus === status ? 'all' : status,
+      activity: 'active',
+      stockStatus: prev.stockStatus === status && prev.activity === 'active' ? 'all' : status,
       expiryFilter: 'all',
     }));
   };
@@ -101,8 +118,16 @@ export default function InventoryPage() {
   const applyExpiryQuickFilter = (expiry: ExpiryFilter) => {
     setFilters((prev) => ({
       ...prev,
-      expiryFilter: prev.expiryFilter === expiry ? 'all' : expiry,
+      activity: 'active',
+      expiryFilter: prev.expiryFilter === expiry && prev.activity === 'active' ? 'all' : expiry,
       stockStatus: 'all',
+    }));
+  };
+
+  const applyInactiveQuickFilter = () => {
+    setFilters((prev) => ({
+      ...emptyInventoryFilters,
+      activity: prev.activity === 'inactive' ? 'active' : 'inactive',
     }));
   };
 
@@ -186,11 +211,18 @@ export default function InventoryPage() {
   };
 
   const statCards: StatItem[] = [
-    { key: 'total', label: t('inventory.totalProducts'), value: stats.total, onClick: () => clearFilters(), active: false },
-    { key: 'low', label: t('inventory.lowStock'), value: stats.low_stock, tone: stats.low_stock ? 'warn' : 'default', onClick: () => applyStockQuickFilter('low_stock'), active: filters.stockStatus === 'low_stock' },
-    { key: 'out', label: t('inventory.outOfStock'), value: stats.out_of_stock, tone: stats.out_of_stock ? 'danger' : 'default', onClick: () => applyStockQuickFilter('out_of_stock'), active: filters.stockStatus === 'out_of_stock' },
-    { key: 'expiring', label: t('inventory.expiringSoon'), value: stats.expiringSoon, tone: stats.expiringSoon ? 'warn' : 'default', onClick: () => applyExpiryQuickFilter('expiring_soon'), active: filters.expiryFilter === 'expiring_soon' },
-    { key: 'expired', label: t('inventory.expired'), value: stats.expired, tone: stats.expired ? 'danger' : 'default', onClick: () => applyExpiryQuickFilter('expired'), active: filters.expiryFilter === 'expired' },
+    {
+      key: 'total',
+      label: t('inventory.totalProducts'),
+      value: stats.total,
+      onClick: () => clearFilters(),
+      active: filters.activity === 'active' && filters.stockStatus === 'all' && filters.expiryFilter === 'all' && !filters.search && filters.category === 'all',
+    },
+    { key: 'low', label: t('inventory.lowStock'), value: stats.low_stock, tone: stats.low_stock ? 'warn' : 'default', onClick: () => applyStockQuickFilter('low_stock'), active: filters.activity === 'active' && filters.stockStatus === 'low_stock' },
+    { key: 'out', label: t('inventory.outOfStock'), value: stats.out_of_stock, tone: stats.out_of_stock ? 'danger' : 'default', onClick: () => applyStockQuickFilter('out_of_stock'), active: filters.activity === 'active' && filters.stockStatus === 'out_of_stock' },
+    { key: 'expiring', label: t('inventory.expiringSoon'), value: stats.expiringSoon, tone: stats.expiringSoon ? 'warn' : 'default', onClick: () => applyExpiryQuickFilter('expiring_soon'), active: filters.activity === 'active' && filters.expiryFilter === 'expiring_soon' },
+    { key: 'expired', label: t('inventory.expired'), value: stats.expired, tone: stats.expired ? 'danger' : 'default', onClick: () => applyExpiryQuickFilter('expired'), active: filters.activity === 'active' && filters.expiryFilter === 'expired' },
+    { key: 'inactive', label: t('inventory.inactive'), value: stats.inactive, onClick: applyInactiveQuickFilter, active: filters.activity === 'inactive' },
   ];
 
   return (
@@ -301,6 +333,7 @@ export default function InventoryPage() {
                   <th className="text-end">{t('inventory.qtyOnHand')}</th>
                   {can('products.view_cost') && <th className="text-end">{t('inventory.cost')}</th>}
                   <th className="text-end">{t('inventory.rate')}</th>
+                  {can('products.view_cost') && <th className="text-end">{t('inventory.margin')}</th>}
                   <th>{t('inventory.category')}</th>
                   <th>{t('inventory.expiryDate')}</th>
                   <th>{t('inventory.status')}</th>
@@ -308,18 +341,41 @@ export default function InventoryPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((product) => {
+                {visibleProducts.map((product) => {
                   const status = deriveStockStatus(product);
+                  const margin = productMarginPercent(product);
+                  const fill = stockFillPercent(product);
                   return (
-                    <tr key={product.id}>
+                    <tr key={product.id} className={cn(!product.active && 'opacity-60')}>
                       <td className="num whitespace-nowrap text-xs text-brand-500 dark:text-brand-400">{getItemCode(product)}</td>
-                      <td className="min-w-[11rem] font-medium">{product.name}</td>
-                      <td className="text-end font-semibold">{product.stock}</td>
+                      <td className="min-w-[11rem] font-medium">
+                        {product.name}
+                        {!product.active && (
+                          <span className="ms-2 text-xs font-normal text-brand-400">{t('inventory.inactive')}</span>
+                        )}
+                      </td>
+                      <td className="min-w-[5.5rem] text-end">
+                        <p className="font-semibold tabular-nums">{product.stock}</p>
+                        <span className="mt-1 block h-1.5 overflow-hidden rounded-full bg-brand-100 dark:bg-brand-800" aria-hidden>
+                          <span
+                            className={cn(
+                              'block h-full rounded-full',
+                              status === 'out_of_stock' ? 'bg-red-500' : status === 'low_stock' ? 'bg-amber-500' : 'bg-emerald-500',
+                            )}
+                            style={{ width: `${fill}%` }}
+                          />
+                        </span>
+                      </td>
                       {can('products.view_cost') && <td className="num whitespace-nowrap text-end text-brand-500">{formatCurrency(product.cost)}</td>}
-                      <td className="num whitespace-nowrap text-end font-semibold">{formatCurrency(product.price)}</td>
+                      <td className="num whitespace-nowrap text-end font-semibold">{formatCurrency(product.salePrice || product.price)}</td>
+                      {can('products.view_cost') && (
+                        <td className={cn('num whitespace-nowrap text-end font-semibold', margin != null && margin < 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400')}>
+                          {margin == null ? '—' : `${margin}%`}
+                        </td>
+                      )}
                       <td><Badge>{product.category}</Badge></td>
                       <td className="whitespace-nowrap"><ExpiryCell expiryDate={product.expiryDate} /></td>
-                      <td><StockBadge status={status} /></td>
+                      <td>{product.active ? <StockBadge status={status} /> : <Badge>{t('inventory.inactive')}</Badge>}</td>
                       <td>
                         <div className="flex justify-end gap-0.5">
                           {can('stock.adjust') && (
@@ -360,6 +416,12 @@ export default function InventoryPage() {
                   </Button>
                 )}
               </div>
+            )}
+            <div ref={rowSentinelRef} className="h-8" aria-hidden />
+            {hasMoreRows && (
+              <p className="px-4 py-2 text-center text-xs text-brand-400">
+                {t('inventory.showingResults', { count: visibleProducts.length, total: filtered.length })}
+              </p>
             )}
           </div>
         </Card>

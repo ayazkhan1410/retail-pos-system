@@ -188,7 +188,7 @@ interface InventoryState {
   categories: string[];
   loading: boolean;
   error: boolean;
-  fetchProducts: () => Promise<void>;
+  fetchProducts: (opts?: { includeInactive?: boolean }) => Promise<void>;
   addProduct: (data: ProductFormData) => Promise<Product>;
   updateProduct: (id: string, data: ProductFormData) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
@@ -202,9 +202,12 @@ export const useInventoryStore = create<InventoryState>()(
       categories: [],
       loading: true,
       error: false,
-      fetchProducts: async () => {
+      fetchProducts: async (opts) => {
         try {
-          const [products, categories] = await Promise.all([inventoryApi.products(), inventoryApi.categories()]);
+          const [products, categories] = await Promise.all([
+            inventoryApi.products({ includeInactive: opts?.includeInactive }),
+            inventoryApi.categories(),
+          ]);
           set({
             products: products.data.map(mapProductFromApi),
             categories: categories.data,
@@ -230,7 +233,9 @@ export const useInventoryStore = create<InventoryState>()(
       },
       deleteProduct: async (id) => {
         await inventoryApi.deleteProduct(id);
-        set({ products: get().products.filter((p) => p.id !== id) });
+        set({
+          products: get().products.map((p) => (p.id === id ? { ...p, active: false } : p)),
+        });
       },
       applySale: (lines) => {
         const sold = new Map(lines.map((line) => [line.productId, line.quantity]));

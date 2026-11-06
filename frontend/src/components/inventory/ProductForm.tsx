@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { ScanBarcode } from 'lucide-react';
 import { Input, Select } from '@/components/ui';
 import { useCan, useInventoryStore, type ProductFormData } from '@/store';
 import { suppliersApi } from '@/services/endpoints';
@@ -71,6 +72,13 @@ export default function ProductForm({ product, onSubmit }: ProductFormProps) {
   const [form, setForm] = useState<ProductFormData>(emptyProduct);
   const [hasFactoryBarcode, setHasFactoryBarcode] = useState(false);
   const [generatedCode, setGeneratedCode] = useState(() => generateInternalBarcode());
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!hasFactoryBarcode) return;
+    const id = window.requestAnimationFrame(() => barcodeInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(id);
+  }, [hasFactoryBarcode]);
 
   useEffect(() => {
     if (product) {
@@ -225,19 +233,30 @@ export default function ProductForm({ product, onSubmit }: ProductFormProps) {
         </div>
 
         {hasFactoryBarcode ? (
-          <Input
-            label={`${t('inventory.barcode')} *`}
-            value={form.aluCode ?? form.barcode}
-            onChange={(e) => {
-              const v = e.target.value;
-              set('aluCode', v);
-              set('barcode', v);
-              set('sku', v);
-            }}
-            placeholder="Scan or type factory barcode"
-            required
-            className="mt-3"
-          />
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center gap-2 rounded-lg border border-dashed border-accent/40 bg-accent-soft/40 px-3 py-2 text-xs text-brand-700 dark:border-accent/30 dark:bg-accent/10 dark:text-brand-200">
+              <ScanBarcode className="h-4 w-4 shrink-0 text-accent" aria-hidden />
+              <span>{t('inventory.scanBarcodeHint')}</span>
+            </div>
+            <Input
+              ref={barcodeInputRef}
+              id="product-factory-barcode"
+              label={t('inventory.barcode')}
+              value={form.aluCode ?? form.barcode}
+              onChange={(e) => {
+                const v = e.target.value;
+                set('aluCode', v);
+                set('barcode', v);
+                set('sku', v);
+              }}
+              placeholder={t('inventory.scanBarcodePlaceholder')}
+              hint={t('inventory.scanBarcodeReady')}
+              icon={<ScanBarcode />}
+              autoComplete="off"
+              inputMode="numeric"
+              required
+            />
+          </div>
         ) : (
           <div className="mt-3 rounded-lg bg-white px-3 py-2 dark:bg-brand-900">
             <p className="text-xs text-brand-500">{t('inventory.generatedBarcode')}</p>

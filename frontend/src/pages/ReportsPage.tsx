@@ -4,6 +4,7 @@ import { Button, Card, CardHeader, CardTitle, Input } from '@/components/ui';
 import { financeApi } from '@/services/endpoints';
 import { useTranslation } from '@/i18n';
 import { formatCurrency, localDate } from '@/utils';
+import { printFinancialReport } from '@/utils/reportPrint';
 import type { FinancialReport } from '@/types';
 
 const daysAgo = (days: number) => {
@@ -36,6 +37,7 @@ export default function ReportsPage() {
   const [to, setTo] = useState(localDate());
   const [report, setReport] = useState<FinancialReport | null>(null);
   const [failed, setFailed] = useState(false);
+  const [printing, setPrinting] = useState(false);
 
   useEffect(() => {
     setFailed(false);
@@ -44,9 +46,62 @@ export default function ReportsPage() {
 
   const money = (value: string | number) => formatCurrency(Number(value));
 
+  const handlePrint = async () => {
+    if (!report || printing) return;
+    setPrinting(true);
+    try {
+      await printFinancialReport(
+        report,
+        { from, to },
+        {
+          documentTitle: t('reports.printTitle'),
+          period: t('reports.printPeriod'),
+          printedAt: t('reports.printedAt'),
+          profitLoss: t('reports.profitLoss'),
+          position: t('reports.position'),
+          topProducts: t('reports.topProducts'),
+          byCategory: t('reports.byCategory'),
+          byCashier: t('reports.byCashier'),
+          expenseBreakdown: t('reports.expenseBreakdown'),
+          netSales: t('reports.netSales'),
+          grossProfit: t('reports.grossProfit'),
+          expenses: t('reports.expenses'),
+          netProfit: t('reports.netProfit'),
+          grossSales: t('reports.grossSales'),
+          returns: t('reports.returns'),
+          costOfGoods: t('reports.costOfGoods'),
+          stockValue: t('reports.stockValue'),
+          supplierPayable: t('reports.supplierPayable'),
+          customerReceivable: t('reports.customerReceivable'),
+          taxCollected: t('reports.taxCollected'),
+          discounts: t('reports.discounts'),
+          invoices: t('sales.invoices'),
+          footer: t('reports.printFooter'),
+        },
+        {
+          money,
+          expenseRows: report.expenses_by_category.map((row) => [
+            t(`expenses.cat_${row.category}`),
+            money(row.amount),
+          ]),
+        },
+      );
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   return (
     <>
-      <Header title={t('reports.title')} subtitle={t('reports.subtitle')} actions={<Button variant="outline" size="sm" onClick={() => window.print()}>{t('reports.print')}</Button>} />
+      <Header
+        title={t('reports.title')}
+        subtitle={t('reports.subtitle')}
+        actions={(
+          <Button variant="outline" size="sm" disabled={!report || printing} onClick={() => void handlePrint()}>
+            {printing ? t('common.loading') : t('reports.print')}
+          </Button>
+        )}
+      />
       <main className="page-bg flex-1 space-y-4 overflow-y-auto p-4 sm:p-6 lg:p-8">
         <Card hover padding="sm">
           <div className="grid gap-3 sm:grid-cols-2 lg:max-w-xl">

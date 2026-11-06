@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from audit.models import AuditLog
 from auth.permissions import requires
+from customers.models import Customer
 from inventory.models import Product, StockLevel, default_branch
 from sales.models import Payment, Sale, SaleLine, SaleReturn, Shift, Terminal
 from sales.serializers import (
@@ -149,12 +150,49 @@ class DashboardView(APIView):
         yesterday = Sale.objects.filter(created_at__date=yesterday_date).aggregate(
             revenue=Coalesce(Sum('total'), Decimal(0)),
         )['revenue'] - self._returned(yesterday_date)
+        returns_today = SaleReturn.objects.filter(created_at__date=today).aggregate(
+            amount=Coalesce(Sum('total'), Decimal(0)),
+            count=Count('id'),
+        )
+        identified = sales_today.exclude(customer_id=None).values('customer_id').distinct().count()
+        walk_ins = sales_today.filter(customer_id=None).count()
+        khata = Customer.objects.filter(active=True, balance__gt=0).aggregate(
+            outstanding=Coalesce(Sum('balance'), Decimal(0)),
+            count=Count('id'),
+        )
+        open_shifts = {
+            shift.terminal_id: shift
+            for shift in Shift.objects.filter(closed_at__isnull=True)
+            .select_related('terminal', 'opened_by')
+            .prefetch_related('sales')
+        }
+        registers = []
+        for terminal in Terminal.objects.filter(active=True).order_by('code'):
+            shift = open_shifts.get(terminal.id)
+            sales_total = (
+                sum((sale.total for sale in shift.sales.all()), Decimal(0)) if shift else Decimal(0)
+            )
+            registers.append({
+                'id': terminal.id,
+                'name': terminal.name,
+                'code': terminal.code,
+                'status': 'open' if shift else 'closed',
+                'cashier': (shift.opened_by.full_name or shift.opened_by.email) if shift else '',
+                'sales_total': sales_total,
+            })
 
         return Response({
             'today_revenue': totals['revenue'] - self._returned(today),
             'today_count': totals['count'],
             'yesterday_revenue': yesterday,
-            'open_counters': Shift.objects.filter(closed_at__isnull=True).count(),
+            'today_returns_count': returns_today['count'],
+            'today_returns_amount': returns_today['amount'],
+            'customers_identified': identified,
+            'customers_walk_in': walk_ins,
+            'khata_outstanding': khata['outstanding'],
+            'khata_customers': khata['count'],
+            'registers': registers,
+            'open_counters': len(open_shifts),
             'total_counters': Terminal.objects.filter(active=True).count(),
             'stock': self._stock_counts(),
             'counters': list(Terminal.objects.filter(active=True).values_list('name', flat=True)),
@@ -184,8 +222,9 @@ class DashboardView(APIView):
                     'target': entry.target,
                     'user': str(entry.user) if entry.user else '',
                     'created_at': entry.created_at,
+                    'details': entry.details or {},
                 }
-                for entry in AuditLog.objects.select_related('user')[:8]
+                for entry in AuditLog.objects.select_related('user')[:15]
             ],
             'recent_shifts': [
                 {**ShiftSerializer(shift).data, 'difference': shift.counted_cash - shift.expected_cash}

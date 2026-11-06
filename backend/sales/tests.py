@@ -120,6 +120,14 @@ class SaleTests(TestCase):
         self.assertEqual(Decimal(split.data['change_due']), 50)
         self.assertEqual(stock_of(self.product), 8)
 
+    def test_sale_writes_recent_activity_log(self):
+        response = self.sell()
+        self.assertEqual(response.status_code, 201)
+        entry = AuditLog.objects.get(action='sale_completed')
+        self.assertEqual(entry.target, response.data['invoice_no'])
+        self.assertEqual(Decimal(entry.details['total']), Decimal(response.data['total']))
+        self.assertFalse(entry.details['offline'])
+
     def test_failed_sale_changes_nothing(self):
         before = self.terminal.last_invoice_seq
         self.sell(payments=[{'method': 'cash', 'amount': '1'}])
@@ -440,7 +448,9 @@ class OfflineSaleTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertTrue(response.data['is_offline'])
         self.assertEqual(Decimal(response.data['total']), 100)
-        self.assertEqual(AuditLog.objects.get(action='offline_sale').details['price_changes'][0]['current'], '150.00')
+        sale_log = AuditLog.objects.get(action='sale_completed')
+        self.assertTrue(sale_log.details['offline'])
+        self.assertEqual(sale_log.details['price_changes'][0]['current'], '150.00')
         self.assertLess(Sale.objects.get().created_at, timezone.now() - timedelta(hours=1))
 
     def test_syncs_after_item_or_shift_changed(self):

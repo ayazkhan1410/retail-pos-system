@@ -144,3 +144,14 @@ class InsightTests(FinanceBase):
     def insights_as_owner(self):
         self.client.force_authenticate(self.user)
         return self.insights()['staff']
+
+    def test_money_analytics_uses_every_bill(self):
+        product = make_product(self.user, stock=50)
+        self.sell(product, quantity=2)
+        money = self.insights()['money']
+        self.assertEqual(money['window_days'], 30)
+        self.assertEqual(money['invoices'], 1)
+        self.assertGreater(Decimal(money['net_sales']), 0)
+        self.assertEqual(len(money['daily']), 30)
+        self.assertEqual(len(money['heatmap']), 7)
+        self.assertEqual(len(money['heatmap'][0]), 24)

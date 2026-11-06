@@ -36,13 +36,22 @@ export function BrandUrdu({ className }: { className?: string }) {
 }
 
 /** Full lockup: mark, English name, divider, Urdu name. */
-export function BrandLogo({ className, markSize = 32 }: { className?: string; markSize?: number }) {
+export function BrandLogo({
+  className,
+  markSize = 32,
+  onDark = false,
+}: {
+  className?: string;
+  markSize?: number;
+  /** White wordmark for dark backgrounds that are not under `.dark`. */
+  onDark?: boolean;
+}) {
   return (
     <span className={cn('inline-flex items-center gap-2.5', className)} role="img" aria-label="Tijori">
       <BrandMark size={markSize} />
-      <BrandWordmark className="h-[0.95em] text-brand-900 dark:text-white" />
-      <span aria-hidden className="h-[0.8em] w-px bg-accent/50" />
-      <BrandUrdu className="h-[0.78em] text-accent" />
+      <BrandWordmark className={cn('h-[0.95em]', onDark ? 'text-white' : 'text-brand-900 dark:text-white')} />
+      <span aria-hidden className={cn('h-[0.8em] w-px', onDark ? 'bg-white/30' : 'bg-accent/50')} />
+      <BrandUrdu className={cn('h-[0.78em]', onDark ? 'text-accent-glow' : 'text-accent')} />
     </span>
   );
 }

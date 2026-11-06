@@ -49,14 +49,14 @@ export default function CashQuickModal({
   // Must type an amount or tap Exact / a note — empty field keeps Take & Print locked.
   const canSubmit = hasEntered && paid >= due && !submitting;
 
-  const submit = (print: boolean, event?: React.FormEvent) => {
+  const submit = (event?: React.FormEvent) => {
     event?.preventDefault();
     if (!canSubmit) return;
     onConfirm({
       discount: 0,
       customer: null,
       payments: [{ method: 'cash', amount: paid.toFixed(2) }],
-      print,
+      print: true,
     });
   };
 
@@ -74,27 +74,18 @@ export default function CashQuickModal({
           </Button>
           <Button variant="outline" onClick={onClose} disabled={submitting}>{t('common.cancel')}</Button>
           <Button
-            variant="outline"
-            type="button"
-            loading={submitting}
-            disabled={!canSubmit}
-            onClick={() => submit(true)}
-          >
-            <Printer className="h-4 w-4" /> {t('pos.printReceipt')}
-          </Button>
-          <Button
             variant="accent"
             type="submit"
             form="cash-quick-form"
             loading={submitting}
             disabled={!canSubmit}
           >
-            {t('pos.takePayment')}
+            <Printer className="h-4 w-4" /> {t('pos.takeAndPrint')}
           </Button>
         </div>
       }
     >
-      <form id="cash-quick-form" onSubmit={(e) => submit(false, e)} className="space-y-4">
+      <form id="cash-quick-form" onSubmit={(e) => submit(e)} className="space-y-4">
         <div className="flex items-baseline justify-between gap-3 rounded-xl bg-brand-50 px-4 py-3 dark:bg-brand-800/50">
           <p className="text-sm font-medium text-brand-500">{t('pos.amountDue')}</p>
           <p className="num text-3xl font-semibold" data-testid="amount-due">

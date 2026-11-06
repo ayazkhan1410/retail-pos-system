@@ -20,6 +20,26 @@ def _reject(message):
     raise ValidationError({'detail': message})
 
 
+def _qty_label(quantity):
+    if quantity == quantity.to_integral_value():
+        return str(int(quantity))
+    return format(quantity.normalize(), 'f')
+
+
+def _sale_items_summary(rows, limit=2):
+    """Short readable line for Recent Activity, e.g. 'Milk ×2, Bread +1 more'."""
+    parts = []
+    for product, quantity, *_ in rows[:limit]:
+        if quantity == 1:
+            parts.append(product.name)
+        else:
+            parts.append(f'{product.name} ×{_qty_label(quantity)}')
+    extra = len(rows) - limit
+    if extra > 0:
+        parts.append(f'+{extra} more')
+    return ', '.join(parts)
+
+
 def create_sale(user, data):
     """Posts a sale once. Returns (sale, created); a repeat client_uuid returns the first result."""
     existing = Sale.objects.filter(client_uuid=data['client_uuid']).first()
@@ -165,6 +185,7 @@ def _post_sale(user, data):
         'offline': offline,
         'items': len(rows),
         'terminal': terminal.name,
+        'summary': _sale_items_summary(rows),
         'price_changes': price_changes if offline else [],
     })
     if data['discount']:

@@ -127,6 +127,9 @@ class SaleTests(TestCase):
         self.assertEqual(entry.target, response.data['invoice_no'])
         self.assertEqual(Decimal(entry.details['total']), Decimal(response.data['total']))
         self.assertFalse(entry.details['offline'])
+        self.assertEqual(entry.details['terminal'], self.terminal.name)
+        self.assertEqual(entry.details['items'], 1)
+        self.assertIn(self.product.name, entry.details['summary'])
 
     def test_failed_sale_changes_nothing(self):
         before = self.terminal.last_invoice_seq

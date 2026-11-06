@@ -8,7 +8,6 @@ import {
   ShoppingCart,
   CreditCard,
   Clock,
-  Activity,
   Wallet,
   Trophy,
   PackageCheck,
@@ -19,6 +18,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
+import RecentActivityCard from '@/components/dashboard/RecentActivityCard';
 import { Card, CardHeader, CardTitle, CardDescription, Badge, EmptyState, ErrorState, Skeleton } from '@/components/ui';
 import { salesApi } from '@/services/endpoints';
 import { useCan } from '@/store';
@@ -484,48 +484,8 @@ export default function DashboardPage() {
           </div>
 
           {/* What happened, what needs restocking */}
-          <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-brand-400" />
-                  {t('dashboard.recentActivity')}
-                </CardTitle>
-              </CardHeader>
-              {data.recent_activity.length === 0 ? (
-                <EmptyState title={noData} compact />
-              ) : (
-                <ol className="relative space-y-4 before:absolute before:inset-y-1 before:start-[5px] before:w-px before:bg-brand-200 dark:before:bg-brand-800">
-                  {data.recent_activity.map((item) => {
-                    const total = item.details?.total != null ? Number(item.details.total) : null;
-                    const isSale = item.action === 'sale_completed' || item.action === 'offline_sale';
-                    return (
-                      <li key={item.id} className="relative flex gap-3 ps-5">
-                        <span
-                          aria-hidden
-                          className={cn(
-                            'absolute start-0 top-1.5 h-[11px] w-[11px] rounded-full border-2 border-white dark:border-brand-900',
-                            isSale ? 'bg-emerald-500' : 'bg-brand-300 dark:bg-brand-600',
-                          )}
-                        />
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">
-                            {t(`dashboard.activity.${item.action}`)}
-                            {item.target && <span className="font-normal text-brand-500"> · {item.target}</span>}
-                            {total != null && Number.isFinite(total) && (
-                              <span className="font-semibold text-brand-800 dark:text-brand-100"> · {formatCurrency(total)}</span>
-                            )}
-                          </p>
-                          <p className="text-xs text-brand-500">
-                            {item.user} · <span className="tabular-nums">{formatDate(item.created_at)}</span>
-                          </p>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-            </Card>
+          <div className="grid gap-4 sm:gap-6 lg:grid-cols-2 lg:items-start">
+            <RecentActivityCard />
 
             <Card>
               <CardHeader>

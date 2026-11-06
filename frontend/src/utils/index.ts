@@ -38,6 +38,21 @@ export function formatDate(date: string): string {
   }).format(new Date(date));
 }
 
+/** Clock time only — used under Today / Yesterday activity sections. */
+export function formatTime(date: string): string {
+  return new Intl.DateTimeFormat('en-PK', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).format(new Date(date));
+}
+
+/** Calendar day key in the shop browser timezone (YYYY-MM-DD). */
+export function localDayKey(date: string | Date): string {
+  const value = typeof date === 'string' ? new Date(date) : date;
+  return localDate(value);
+}
+
 export function getStockStatus(stock: number): 'in_stock' | 'low_stock' | 'out_of_stock' {
   if (stock <= 0) return 'out_of_stock';
   if (stock <= 10) return 'low_stock';

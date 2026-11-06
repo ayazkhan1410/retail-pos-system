@@ -40,6 +40,7 @@ export function mapSupplierFromApi(data: SupplierApi): Supplier {
   return {
     id: String(data.id),
     name: data.name,
+    contactPerson: data.contact_person ?? '',
     phone: data.phone ?? '',
     email: data.email ?? '',
     address: data.address ?? '',
@@ -58,6 +59,7 @@ export function mapSupplierFromApi(data: SupplierApi): Supplier {
 export function mapSupplierToApi(data: SupplierFormData): Record<string, unknown> {
   return {
     name: data.name.trim(),
+    contact_person: data.contactPerson || null,
     phone: data.phone || null,
     email: data.email || null,
     address: data.address || null,

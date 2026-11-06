@@ -186,3 +186,10 @@ backups/*
 
 # Desktop
 desktop/node_modules/
+
+# Frontend build caches
+frontend/.vite/
+*.tsbuildinfo
+
+# Local demo passwords
+.local-demo-logins.txt

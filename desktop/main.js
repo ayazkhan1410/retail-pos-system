@@ -1,12 +1,11 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const { exec } = require('child_process');
-const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
 const ROOT_DIR = path.join(__dirname, '..');
 const APP_URL = process.env.SMARTSHOP_URL || 'http://localhost:3000';
-const HEALTH_URL = 'http://localhost:8000/api/health-check/';
+const HEALTH_URL = `${APP_URL}/api/health-check/`;
 
 let mainWindow;
 let splashWindow;
@@ -30,24 +29,6 @@ function setSplashProgress(percent, message) {
       `window.setLoadingProgress(${percent}, ${JSON.stringify(message)})`,
     )
     .catch(() => undefined);
-}
-
-function sendUpdateProgress(percent, message) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send('update-progress', { percent, message });
-}
-
-function bumpAppVersionInEnv() {
-  const envPath = path.join(ROOT_DIR, '.env');
-  if (!fs.existsSync(envPath)) return;
-
-  const content = fs.readFileSync(envPath, 'utf8');
-  const latestMatch = content.match(/^LATEST_APP_VERSION=(.+)$/m);
-  if (!latestMatch) return;
-
-  const latest = latestMatch[1].trim();
-  const updated = content.replace(/^APP_VERSION=.*$/m, `APP_VERSION=${latest}`);
-  fs.writeFileSync(envPath, updated);
 }
 
 function waitForHealth(maxAttempts = 60, onProgress) {
@@ -90,7 +71,7 @@ function waitForHealth(maxAttempts = 60, onProgress) {
 
 async function startStack() {
   setSplashProgress(8, 'Starting Docker services…');
-  await execAsync('docker compose up -d');
+  await execAsync('docker compose -f docker-compose.prod.yml up -d');
   setSplashProgress(35, 'Services are starting…');
   await waitForHealth(60, setSplashProgress);
 }
@@ -140,33 +121,21 @@ function createWindow() {
     mainWindow.show();
   });
 
+  // Only the POS itself runs in this window; anything else opens in the normal browser.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url === 'about:blank' || url.startsWith(APP_URL)) return { action: 'allow' };
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith(APP_URL)) event.preventDefault();
+  });
+
   mainWindow.loadURL(APP_URL);
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
-
-ipcMain.handle('apply-update', async () => {
-  try {
-    sendUpdateProgress(5, 'Downloading latest images…');
-    await execAsync('docker compose pull');
-
-    sendUpdateProgress(35, 'Updating application version…');
-    bumpAppVersionInEnv();
-
-    sendUpdateProgress(50, 'Rebuilding and restarting services…');
-    await execAsync('docker compose up -d --build');
-
-    await waitForHealth(60, (percent, message) => {
-      sendUpdateProgress(percent, message);
-    });
-
-    sendUpdateProgress(100, 'Update complete');
-    return { success: true, message: 'Update installed successfully. Reloading…' };
-  } catch (error) {
-    return { success: false, message: error.message || 'Update failed.' };
-  }
-});
 
 ipcMain.handle('open-backups-folder', async () => {
   const backupsPath = path.join(ROOT_DIR, 'backups');

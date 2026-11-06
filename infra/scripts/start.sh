@@ -13,8 +13,8 @@ fi
 
 docker compose up -d
 
-# shellcheck disable=SC1091
-. ./.env
+# .env is not valid shell (values contain spaces), so read only what is needed.
+POSTGRES_PORT="$(sed -n 's/^POSTGRES_PORT=//p' .env)"
 
 echo ""
 echo "SmartShop POS is starting:"

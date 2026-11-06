@@ -3,6 +3,19 @@ from rest_framework import serializers
 from .models import Supplier
 
 
+class UniqueNameMixin:
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Supplier name is required.")
+        existing = Supplier.objects.filter(name__iexact=value)
+        if self.instance:
+            existing = existing.exclude(pk=self.instance.pk)
+        if existing.exists():
+            raise serializers.ValidationError("A supplier with this name already exists.")
+        return value
+
+
 class SupplierListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Supplier
@@ -29,7 +42,7 @@ class SupplierDetailSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-class CreateSupplierSerializer(serializers.ModelSerializer):
+class CreateSupplierSerializer(UniqueNameMixin, serializers.ModelSerializer):
     class Meta:
         model = Supplier
         fields = (
@@ -95,18 +108,9 @@ class CreateSupplierSerializer(serializers.ModelSerializer):
             },
         }
 
-    def validate_name(self, value):
-        value = value.strip()
-
-        if not value:
-            raise serializers.ValidationError(
-                "Supplier name is required."
-            )
-        return value
 
 
-
-class UpdateSupplierSerializer(serializers.ModelSerializer):
+class UpdateSupplierSerializer(UniqueNameMixin, serializers.ModelSerializer):
     class Meta:
         model = Supplier
         fields = (
@@ -128,12 +132,6 @@ class UpdateSupplierSerializer(serializers.ModelSerializer):
             for field in fields
         }
 
-    def validate_name(self, value):
-        if value is not None and not value.strip():
-            raise serializers.ValidationError(
-                "Supplier name cannot be empty."
-            )
-        return value
 
 
 class BulkDeleteSupplierSerializer(serializers.Serializer):

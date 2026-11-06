@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 
 export function useKeyboardShortcut(
   key: string,
@@ -24,39 +24,4 @@ export function useKeyboardShortcut(
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [key, options?.ctrl, options?.shift, options?.alt]);
-}
-
-export function useBarcodeScanner(onScan: (barcode: string) => void) {
-  const bufferRef = useRef('');
-  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
-        return;
-      }
-
-      if (e.key === 'Enter') {
-        if (bufferRef.current.length >= 3) {
-          onScan(bufferRef.current);
-          bufferRef.current = '';
-        }
-        return;
-      }
-
-      if (e.key.length === 1) {
-        bufferRef.current += e.key;
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = setTimeout(() => {
-          bufferRef.current = '';
-        }, 100);
-      }
-    },
-    [onScan],
-  );
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleKeyDown]);
 }

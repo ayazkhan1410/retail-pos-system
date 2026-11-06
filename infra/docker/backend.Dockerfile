@@ -5,8 +5,11 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+# pg_dump must match the postgres:16 server: a newer client writes backups that version 16 refuses to restore.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential postgresql-client \
+    && apt-get install -y --no-install-recommends build-essential postgresql-common ca-certificates \
+    && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
+    && apt-get install -y --no-install-recommends postgresql-client-16 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt /app/requirements.txt

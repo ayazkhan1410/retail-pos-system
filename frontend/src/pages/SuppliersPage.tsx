@@ -10,7 +10,10 @@ import {
 import { Header } from '@/layouts/DashboardLayout';
 import { Card, Button, Input, Badge, Modal } from '@/components/ui';
 import SupplierForm from '@/components/suppliers/SupplierForm';
+import { apiErrorMessage } from '@/services';
 import { suppliersApi } from '@/services/endpoints';
+import { useTranslation } from '@/i18n';
+import { useCan } from '@/store';
 import { mapSupplierFromApi, mapSupplierToApi } from '@/services/suppliers';
 import { formatCurrency } from '@/utils';
 import type { Supplier } from '@/types';
@@ -19,6 +22,8 @@ import type { SupplierFormData } from '@/store';
 const PAGE_SIZE = 20;
 
 export default function SuppliersPage() {
+  const { t } = useTranslation();
+  const can = useCan();
   const mainRef = useRef<HTMLElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -158,8 +163,8 @@ export default function SuppliersPage() {
       setModalOpen(false);
       setEditingSupplier(null);
       reloadFromStart();
-    } catch {
-      setError(editingSupplier ? 'Failed to update supplier.' : 'Failed to create supplier.');
+    } catch (err) {
+      setError(apiErrorMessage(err, editingSupplier ? 'Failed to update supplier.' : 'Failed to create supplier.'));
     } finally {
       setSaving(false);
     }
@@ -171,21 +176,21 @@ export default function SuppliersPage() {
     try {
       await suppliersApi.delete(supplier.id);
       reloadFromStart();
-    } catch {
-      setError('Failed to delete supplier.');
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to delete supplier.'));
     }
   };
 
   return (
     <>
       <Header
-        title="Suppliers"
-        subtitle={`${totalCount} suppliers · ${activeCount} active`}
-        actions={
+        title={t('suppliers.title')}
+        subtitle={t('suppliers.subtitle', { total: totalCount, active: activeCount })}
+        actions={can('suppliers.edit') && (
           <Button variant="accent" size="sm" onClick={openAdd}>
-            <Plus className="h-4 w-4" /> Add Supplier
+            <Plus className="h-4 w-4" /> {t('suppliers.addSupplier')}
           </Button>
-        }
+        )}
       />
 
       <main ref={mainRef} className="page-bg flex-1 overflow-y-auto p-4 sm:p-6">
@@ -195,23 +200,19 @@ export default function SuppliersPage() {
           </div>
         )}
 
-        <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <div className="mb-4 grid gap-3 sm:grid-cols-2">
           <Card hover className="flex items-center gap-3" padding="sm">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/10">
               <Building2 className="h-4 w-4 text-accent" />
             </div>
             <div>
-              <p className="text-xs text-brand-500">Total Suppliers</p>
+              <p className="text-xs text-brand-500">{t('suppliers.totalSuppliers')}</p>
               <p className="font-display text-xl font-bold">{totalCount}</p>
             </div>
           </Card>
           <Card hover padding="sm">
-            <p className="text-xs text-brand-500">Active Suppliers</p>
+            <p className="text-xs text-brand-500">{t('suppliers.activeSuppliers')}</p>
             <p className="font-display text-xl font-bold text-emerald-600">{activeCount}</p>
-          </Card>
-          <Card hover padding="sm">
-            <p className="text-xs text-brand-500">Total Purchases</p>
-            <p className="font-display text-xl font-bold">{formatCurrency(0)}</p>
           </Card>
         </div>
 
@@ -219,7 +220,7 @@ export default function SuppliersPage() {
           <div className="border-b border-brand-100 p-3 dark:border-brand-800">
             <div className="max-w-sm">
               <Input
-                placeholder="Search by name, city, phone..."
+                placeholder={t('suppliers.searchPlaceholder')}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 icon={<Search className="h-4 w-4" />}
@@ -228,14 +229,16 @@ export default function SuppliersPage() {
           </div>
 
           {initialLoading ? (
-            <div className="py-10 text-center text-sm text-brand-500">Loading suppliers…</div>
+            <div className="py-10 text-center text-sm text-brand-500">{t('common.loading')}</div>
           ) : suppliers.length === 0 ? (
             <div className="py-10 text-center">
               <Building2 className="mx-auto h-10 w-10 text-brand-300" />
-              <p className="mt-2 text-sm font-medium">No suppliers found</p>
-              <Button variant="accent" size="sm" className="mt-3" onClick={openAdd}>
-                <Plus className="h-4 w-4" /> Add First Supplier
-              </Button>
+              <p className="mt-2 text-sm font-medium">{t('suppliers.noSuppliers')}</p>
+              {can('suppliers.edit') && (
+                <Button variant="accent" size="sm" className="mt-3" onClick={openAdd}>
+                  <Plus className="h-4 w-4" /> {t('suppliers.addFirst')}
+                </Button>
+              )}
             </div>
           ) : (
             <div className="divide-y divide-brand-100 dark:divide-brand-800">
@@ -265,7 +268,7 @@ export default function SuppliersPage() {
                     </div>
                   </div>
 
-                  <div className="flex shrink-0 gap-0.5">
+                  {can('suppliers.edit') && <div className="flex shrink-0 gap-0.5">
                     <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openEdit(supplier)}>
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>
@@ -277,7 +280,7 @@ export default function SuppliersPage() {
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
-                  </div>
+                  </div>}
                 </div>
               ))}
             </div>
@@ -302,15 +305,15 @@ export default function SuppliersPage() {
       <Modal
         open={modalOpen}
         onClose={() => !saving && setModalOpen(false)}
-        title={editingSupplier ? 'Edit Supplier' : 'Add New Supplier'}
+        title={editingSupplier ? t('suppliers.editSupplier') : t('suppliers.addNewSupplier')}
         size="lg"
         footer={
           <>
             <Button variant="outline" onClick={() => setModalOpen(false)} disabled={saving}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button variant="accent" type="submit" form="supplier-form" disabled={saving}>
-              {saving ? 'Saving…' : editingSupplier ? 'Save Changes' : 'Add Supplier'}
+              {saving ? t('common.loading') : editingSupplier ? t('inventory.saveChanges') : t('suppliers.addSupplier')}
             </Button>
           </>
         }
@@ -321,27 +324,30 @@ export default function SuppliersPage() {
       <Modal
         open={viewModalOpen}
         onClose={() => setViewModalOpen(false)}
-        title="Supplier Details"
+        title={t('suppliers.supplierDetails')}
         size="lg"
         footer={
           <>
-            <Link to="/purchases">
-              <Button variant="accent" size="sm">Create Purchase</Button>
-            </Link>
-            <Button variant="outline" onClick={() => setViewModalOpen(false)}>Close</Button>
+            {can('purchases.edit') && (
+              <Link to="/purchases">
+                <Button variant="accent" size="sm">{t('suppliers.createPurchase')}</Button>
+              </Link>
+            )}
+            <Button variant="outline" onClick={() => setViewModalOpen(false)}>{t('common.close')}</Button>
           </>
         }
       >
         {viewingSupplier && (
           <div className="grid gap-4 sm:grid-cols-2">
             {[
-              { label: 'Company Name', value: viewingSupplier.name },
-              { label: 'Phone', value: viewingSupplier.phone || '—' },
-              { label: 'Email', value: viewingSupplier.email || '—' },
-              { label: 'City', value: viewingSupplier.city || '—' },
-              { label: 'NTN / STRN', value: viewingSupplier.ntn || '—' },
-              { label: 'Address', value: viewingSupplier.address || '—', full: true },
-              { label: 'Bank Account', value: viewingSupplier.bankAccount || '—', full: true },
+              { label: t('suppliers.companyName'), value: viewingSupplier.name },
+              { label: t('suppliers.contactPerson'), value: viewingSupplier.contactPerson || '—' },
+              { label: t('suppliers.phone'), value: viewingSupplier.phone || '—' },
+              { label: t('suppliers.email'), value: viewingSupplier.email || '—' },
+              { label: t('suppliers.city'), value: viewingSupplier.city || '—' },
+              { label: t('suppliers.ntn'), value: viewingSupplier.ntn || '—' },
+              { label: t('suppliers.address'), value: viewingSupplier.address || '—', full: true },
+              { label: t('suppliers.bankAccount'), value: viewingSupplier.bankAccount || '—', full: true },
               { label: 'Payment Type', value: viewingSupplier.paymentType === 'credit' ? 'Credit' : 'Cash' },
               { label: 'Current Balance', value: formatCurrency(viewingSupplier.currentBalance) },
               { label: 'Status', value: viewingSupplier.status },
@@ -353,7 +359,7 @@ export default function SuppliersPage() {
             ))}
             {viewingSupplier.notes && (
               <div className="sm:col-span-2 rounded-xl bg-brand-50 p-4 dark:bg-brand-800/30">
-                <p className="text-xs font-medium text-brand-500">Notes</p>
+                <p className="text-xs font-medium text-brand-500">{t('suppliers.notes')}</p>
                 <p className="mt-1 text-sm">{viewingSupplier.notes}</p>
               </div>
             )}

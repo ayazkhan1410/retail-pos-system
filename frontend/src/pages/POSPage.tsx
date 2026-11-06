@@ -35,7 +35,7 @@ import CashQuickModal from '@/components/pos/CashQuickModal';
 import ChangeFlash from '@/components/pos/ChangeFlash';
 import PaymentModal, { type PaymentResult } from '@/components/pos/PaymentModal';
 import PinSwitchModal from '@/components/pos/PinSwitchModal';
-import { CloseShiftModal, OpenShiftModal, ShiftSummaryModal } from '@/components/pos/ShiftModals';
+import { CloseShiftModal, ShiftSummaryModal } from '@/components/pos/ShiftModals';
 import type { CartItem, Customer, PaymentMethod, Product, Sale, Shift, Terminal } from '@/types';
 import { useTranslation } from '@/i18n';
 import LanguageToggle from '@/components/layout/LanguageToggle';
@@ -160,8 +160,10 @@ export default function POSPage() {
   const billListRef = useRef<HTMLDivElement>(null);
   // Kept until the bill changes, so a retry after a lost reply can't charge the customer twice.
   const saleUuid = useRef(newUuid());
+  /** Prevents double auto-open while the open request is in flight. */
+  const autoOpenedFor = useRef<number | null>(null);
 
-  const modalOpen = !!payMethod || !!completedSale || !!changeFlash || closingShift || !!closedShift || (shiftLoaded && !shift) || confirmOpen;
+  const modalOpen = !!payMethod || !!completedSale || !!changeFlash || closingShift || !!closedShift || confirmOpen;
 
   const focusScanner = useCallback(() => {
     window.requestAnimationFrame(() => scannerRef.current?.focus());
@@ -305,21 +307,21 @@ export default function POSPage() {
 
   const startPayment = useCallback(
     (method: PaymentMethod) => {
-      if (cart.length === 0 || modalOpen) return;
+      if (cart.length === 0 || modalOpen || !shift) return;
       setPayError('');
       setFullPayForm(method !== 'cash');
       setPayMethod(method);
     },
-    [cart.length, modalOpen],
+    [cart.length, modalOpen, shift],
   );
 
   /** Card, wallets, split and khata all go through the full payment form. */
   const startFullPayment = useCallback(() => {
-    if (cart.length === 0 || modalOpen) return;
+    if (cart.length === 0 || modalOpen || !shift) return;
     setPayError('');
     setFullPayForm(true);
     setPayMethod('cash');
-  }, [cart.length, modalOpen]);
+  }, [cart.length, modalOpen, shift]);
 
   const completeSale = async (result: PaymentResult) => {
     if (!activeCounter || submitting) return;
@@ -406,16 +408,29 @@ export default function POSPage() {
       setNotice({ text: t('pos.switchBlocked'), kind: 'warning' });
       return;
     }
+    autoOpenedFor.current = null;
     setShiftLoaded(false);
     setActiveCounter(counter);
   };
 
-  const openShift = async (amount: string) => {
+  const openShift = useCallback(async (amount: string) => {
     if (!activeCounter) return;
     const { data } = await salesApi.openShift(activeCounter.id, amount);
     setShift(data);
     focusScanner();
-  };
+  }, [activeCounter, focusScanner]);
+
+  // Auto-open with Rs 0 so a rush is never blocked by the opening-cash popup.
+  // Close-shift still counts the drawer for accountability.
+  useEffect(() => {
+    if (!activeCounter || !shiftLoaded || shift || closedShift) return;
+    if (autoOpenedFor.current === activeCounter.id) return;
+    autoOpenedFor.current = activeCounter.id;
+    void openShift('0').catch(() => {
+      autoOpenedFor.current = null;
+      setNotice({ text: t('pos.shiftOpenFailed'), kind: 'error' });
+    });
+  }, [activeCounter, closedShift, openShift, shift, shiftLoaded, t]);
 
   const closeShift = async (amount: string) => {
     if (!shift) return;
@@ -479,6 +494,7 @@ export default function POSPage() {
   const subtotal = cartTotal();
   const itemCount = cartItemCount();
   const empty = cart.length === 0;
+  const tillReady = !!shift;
   const inCart = new Map(cart.map((item) => [item.product.id, item.quantity]));
   const barButton =
     'flex h-8 items-center justify-center gap-1.5 rounded-lg border border-brand-200 bg-white px-2.5 text-sm font-medium text-brand-700 shadow-soft transition-colors hover:bg-brand-50 hover:text-brand-900 focus-ring disabled:cursor-not-allowed disabled:opacity-45 dark:border-brand-800 dark:bg-brand-900 dark:text-brand-200 dark:hover:bg-brand-800 dark:hover:text-white';
@@ -844,7 +860,7 @@ export default function POSPage() {
           </div>
           <button
             type="button"
-            disabled={empty}
+            disabled={empty || !tillReady}
             onClick={() => startPayment('cash')}
             aria-keyshortcuts="F1"
             className="mt-3 flex h-14 w-full items-center justify-center gap-3 rounded-xl bg-brand-900 text-base font-semibold text-white shadow-soft transition-[background-color,transform] hover:bg-brand-800 active:scale-[0.99] focus-ring disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100 dark:bg-white dark:text-brand-900 dark:hover:bg-brand-100"
@@ -853,16 +869,16 @@ export default function POSPage() {
             <kbd className="border-white/20 bg-white/10 text-white/80 dark:border-brand-300 dark:bg-brand-100 dark:text-brand-600">F1</kbd>
           </button>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            <button type="button" disabled={empty} onClick={() => startPayment('jazzcash')} className={payButton}>
+            <button type="button" disabled={empty || !tillReady} onClick={() => startPayment('jazzcash')} className={payButton}>
               <Smartphone className="h-4 w-4 shrink-0" /> <span className="truncate">{t('pos.jazzcash')}</span>
             </button>
-            <button type="button" disabled={empty} onClick={() => startPayment('easypaisa')} className={payButton}>
+            <button type="button" disabled={empty || !tillReady} onClick={() => startPayment('easypaisa')} className={payButton}>
               <Smartphone className="h-4 w-4 shrink-0" /> <span className="truncate">{t('pos.easypaisa')}</span>
             </button>
-            <button type="button" disabled={empty} onClick={() => startPayment('card')} aria-keyshortcuts="Control+F9" className={payButton}>
+            <button type="button" disabled={empty || !tillReady} onClick={() => startPayment('card')} aria-keyshortcuts="Control+F9" className={payButton}>
               <CreditCard className="h-4 w-4 shrink-0" /> <span className="truncate">{t('pos.cardPay')}</span>
             </button>
-            <button type="button" disabled={empty} onClick={startFullPayment} className={payButton}>
+            <button type="button" disabled={empty || !tillReady} onClick={startFullPayment} className={payButton}>
               <SplitSquareHorizontal className="h-4 w-4 shrink-0" /> <span className="truncate">{t('pos.split')}</span>
             </button>
           </div>
@@ -953,16 +969,16 @@ export default function POSPage() {
           )}
         </Modal>
 
-        {shiftLoaded && !shift && !closedShift && activeCounter && (
-          <OpenShiftModal
-            counterName={activeCounter.name}
-            canLeave={can('dashboard.view')}
-            onOpen={openShift}
-            onLogout={() => void logout()}
+        {closingShift && <CloseShiftModal onClose={() => setClosingShift(false)} onSubmit={closeShift} />}
+        {closedShift && (
+          <ShiftSummaryModal
+            shift={closedShift}
+            onClose={() => {
+              autoOpenedFor.current = null;
+              setClosedShift(null);
+            }}
           />
         )}
-        {closingShift && <CloseShiftModal onClose={() => setClosingShift(false)} onSubmit={closeShift} />}
-        {closedShift && <ShiftSummaryModal shift={closedShift} onClose={() => setClosedShift(null)} />}
       </div>
     </div>
   );

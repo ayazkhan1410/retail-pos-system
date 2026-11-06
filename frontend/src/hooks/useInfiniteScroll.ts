@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 
-/** Fires `onLoadMore` when `sentinelRef` enters the scroll viewport. */
+/** Fires `onLoadMore` when `sentinelRef` enters the scroll root (or viewport). */
 export function useInfiniteScroll(
   enabled: boolean,
   onLoadMore: () => void,
-  options?: { rootMargin?: string },
+  options?: { rootMargin?: string; rootRef?: RefObject<Element | null>; root?: Element | null },
 ) {
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const loadingRef = useRef(false);
@@ -12,6 +12,9 @@ export function useInfiniteScroll(
   useEffect(() => {
     const node = sentinelRef.current;
     if (!enabled || !node) return;
+    const root = options?.root ?? options?.rootRef?.current ?? null;
+    // Nested scroll boxes need an explicit root; skip until that node exists.
+    if (options?.rootRef && !root && options.root == null) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
@@ -21,11 +24,11 @@ export function useInfiniteScroll(
           loadingRef.current = false;
         });
       },
-      { root: null, rootMargin: options?.rootMargin ?? '240px', threshold: 0 },
+      { root, rootMargin: options?.rootMargin ?? '240px', threshold: 0 },
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [enabled, onLoadMore, options?.rootMargin]);
+  }, [enabled, onLoadMore, options?.root, options?.rootMargin, options?.rootRef]);
 
   return sentinelRef;
 }

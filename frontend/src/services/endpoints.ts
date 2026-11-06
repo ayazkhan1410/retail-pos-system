@@ -115,9 +115,23 @@ export const salesApi = {
   dashboard: () => api.get<DashboardData>('/sales/dashboard/'),
 };
 
+export type ActivityItem = {
+  id: number;
+  action: string;
+  target: string;
+  user: string;
+  created_at: string;
+  details?: Record<string, unknown>;
+};
+
 export const auditApi = {
   cartCleared: (items: number, total: number) =>
     api.post('/audit/events/', { action: 'cart_cleared', details: { items, total } }),
+  activity: (params?: { page?: number; page_size?: number }) =>
+    api.get<{ count: number; next: string | null; previous: string | null; results: ActivityItem[] }>(
+      '/audit/activity/',
+      { params: { page: params?.page, page_size: params?.page_size ?? 8 } },
+    ),
 };
 
 export const suppliersApi = {

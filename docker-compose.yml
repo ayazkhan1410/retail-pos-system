@@ -23,7 +23,7 @@ services:
   backend:
     build:
       context: .
-      dockerfile: infra/docker/backend.Dockerfile
+      dockerfile: infra/docker/backend.dev.Dockerfile
     env_file:
       - .env
     environment:

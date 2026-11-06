@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Search, Download, Eye, Printer, Receipt, Undo2 } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Card, Button, Input, Select, Badge, Modal } from '@/components/ui';
+import { Card, Button, Input, Select, Badge, Modal, EmptyState } from '@/components/ui';
 import { salesApi } from '@/services/endpoints';
 import { useTranslation } from '@/i18n';
 import { useCan } from '@/store';
@@ -114,7 +114,7 @@ export default function SalesPage() {
         )}
       />
 
-      <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6">
+      <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
         <div className="mb-6 grid gap-4 sm:grid-cols-3">
           {[
             { label: t('sales.totalRevenue'), value: formatCurrency(revenue), sub: t('common.pkr') },
@@ -146,42 +146,42 @@ export default function SalesPage() {
             <Input type="date" aria-label={t('sales.to')} title={t('sales.to')} value={to} onChange={(e) => setTo(e.target.value)} />
           </div>
 
-          {error && <p role="alert" className="p-4 text-sm text-red-600">{t('sales.loadError')}</p>}
+          {error && <p role="alert" className="m-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{t('sales.loadError')}</p>}
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="data-table min-w-[760px]">
               <thead>
-                <tr className="border-b border-brand-100 bg-brand-50/50 text-left text-xs font-semibold uppercase tracking-wider text-brand-500 dark:border-brand-800 dark:bg-brand-800/30">
-                  <th className="px-6 py-4">{t('sales.invoice')}</th>
-                  <th className="px-6 py-4">{t('sales.counter')}</th>
-                  <th className="px-6 py-4">{t('sales.date')}</th>
-                  <th className="px-6 py-4 text-right">{t('sales.items')}</th>
-                  <th className="px-6 py-4 text-right">{t('sales.total')}</th>
-                  <th className="px-6 py-4">{t('sales.payment')}</th>
-                  <th className="px-6 py-4" />
+                <tr>
+                  <th>{t('sales.invoice')}</th>
+                  <th>{t('sales.counter')}</th>
+                  <th>{t('sales.date')}</th>
+                  <th className="text-end">{t('sales.items')}</th>
+                  <th className="text-end">{t('sales.total')}</th>
+                  <th>{t('sales.payment')}</th>
+                  <th><span className="sr-only">{t('common.view')}</span></th>
                 </tr>
               </thead>
               <tbody>
                 {sales.map((sale) => (
-                  <tr key={sale.id} className="border-b border-brand-50 transition-colors hover:bg-brand-50/80 dark:border-brand-800/40 dark:hover:bg-brand-800/20">
-                    <td className="px-6 py-4">
+                  <tr key={sale.id}>
+                    <td>
                       <div className="flex items-center gap-2">
                         <Receipt className="h-4 w-4 text-brand-400" />
                         <span dir="ltr" className="font-mono text-xs font-semibold">{sale.invoice_no}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4"><Badge>{sale.terminal_name}</Badge></td>
-                    <td className="px-6 py-4 text-brand-500">{formatDate(sale.created_at)}</td>
-                    <td className="px-6 py-4 text-right">{sale.lines.length}</td>
-                    <td className="px-6 py-4 text-right font-bold">{formatCurrency(Number(sale.total))}</td>
-                    <td className="px-6 py-4">
+                    <td><Badge>{sale.terminal_name}</Badge></td>
+                    <td className="tabular-nums text-brand-500">{formatDate(sale.created_at)}</td>
+                    <td className="text-end tabular-nums">{sale.lines.length}</td>
+                    <td className="text-end font-semibold tabular-nums">{formatCurrency(Number(sale.total))}</td>
+                    <td>
                       <div className="flex flex-wrap gap-1">
                         {sale.payments.map((payment) => (
                           <Badge key={payment.method} variant="info">{t(METHOD_KEYS[payment.method])}</Badge>
                         ))}
                       </div>
                     </td>
-                    <td className="px-6 py-4">
+                    <td>
                       <Button variant="ghost" size="sm" aria-label={t('common.view')} onClick={() => setViewing(sale)}>
                         <Eye className="h-3.5 w-3.5" />
                       </Button>
@@ -191,7 +191,7 @@ export default function SalesPage() {
               </tbody>
             </table>
             {!loading && !error && sales.length === 0 && (
-              <p className="py-16 text-center text-sm text-brand-500">{t('sales.empty')}</p>
+              <EmptyState icon={Receipt} title={t('sales.empty')} />
             )}
           </div>
 

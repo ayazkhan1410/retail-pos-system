@@ -8,7 +8,7 @@ import {
   Building2,
 } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
-import { Card, Button, Input, Badge, Modal } from '@/components/ui';
+import { Card, Button, Input, Badge, Modal, confirmAction, toast, SkeletonRows } from '@/components/ui';
 import SupplierForm from '@/components/suppliers/SupplierForm';
 import LedgerPanel from '@/components/customers/LedgerPanel';
 import { apiErrorMessage } from '@/services';
@@ -172,13 +172,20 @@ export default function SuppliersPage() {
   };
 
   const handleDelete = async (supplier: Supplier) => {
-    if (!window.confirm(`Delete supplier "${supplier.name}"?`)) return;
+    const confirmed = await confirmAction({
+      title: t('suppliers.deleteTitle'),
+      body: t('suppliers.confirmDelete', { name: supplier.name }),
+      confirmLabel: t('common.delete'),
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     setError(null);
     try {
       await suppliersApi.delete(supplier.id);
       reloadFromStart();
+      toast(t('suppliers.deleted', { name: supplier.name }));
     } catch (err) {
-      setError(apiErrorMessage(err, 'Failed to delete supplier.'));
+      setError(apiErrorMessage(err, t('suppliers.deleteError')));
     }
   };
 
@@ -194,7 +201,7 @@ export default function SuppliersPage() {
         )}
       />
 
-      <main ref={mainRef} className="page-bg flex-1 overflow-y-auto p-4 sm:p-6">
+      <main ref={mainRef} className="page-bg flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
         {error && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
             {error}
@@ -230,7 +237,7 @@ export default function SuppliersPage() {
           </div>
 
           {initialLoading ? (
-            <div className="py-10 text-center text-sm text-brand-500">{t('common.loading')}</div>
+            <SkeletonRows rows={5} columns={4} label={t('common.loading')} />
           ) : suppliers.length === 0 ? (
             <div className="py-10 text-center">
               <Building2 className="mx-auto h-10 w-10 text-brand-300" />

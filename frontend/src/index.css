@@ -3,54 +3,136 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --accent: 1 65 28;
+    --accent-light: 10 92 47;
+    --accent-glow: 34 160 95;
+    --accent-soft: 230 241 235;
+    color-scheme: light;
+  }
+
+  .dark {
+    --accent: 31 138 77;
+    --accent-light: 40 160 92;
+    --accent-glow: 86 205 138;
+    --accent-soft: 18 46 31;
+    color-scheme: dark;
+  }
+
   * {
     @apply border-brand-200 dark:border-brand-800;
   }
 
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
   body {
-    @apply bg-brand-100 text-brand-900 antialiased dark:bg-brand-950 dark:text-brand-50;
+    @apply bg-brand-50 text-brand-900 antialiased dark:bg-brand-950 dark:text-brand-50;
+    font-feature-settings: 'cv11', 'ss03';
     padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
 
   #root {
     @apply min-h-screen;
   }
+
+  kbd {
+    @apply inline-flex h-5 min-w-5 items-center justify-center rounded border border-brand-200 bg-white px-1 font-sans text-2xs font-semibold text-brand-600 dark:border-brand-700 dark:bg-brand-800 dark:text-brand-300;
+  }
+
+  /* Number inputs: the spinners are too small to tap and invite wrong quantities. */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
 }
 
 @layer components {
   .focus-ring {
-    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 dark:focus-visible:ring-accent-glow dark:focus-visible:ring-offset-brand-950;
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-brand-950;
   }
 
+  /* Kept for existing markup; now a plain surface rather than frosted glass. */
   .glass {
-    @apply border border-white/20 bg-white/70 backdrop-blur-xl dark:border-white/10 dark:bg-brand-900/70;
+    @apply border border-brand-200 bg-white dark:border-brand-800 dark:bg-brand-900;
   }
 
   .glass-dark {
-    @apply border border-white/10 bg-brand-900/60 backdrop-blur-xl;
+    @apply border border-white/10 bg-brand-900;
   }
 
   .page-bg {
-    @apply bg-mesh-light dark:bg-mesh-dark;
+    @apply bg-brand-50 dark:bg-brand-950;
   }
 
   .gradient-border {
-    @apply relative before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] before:p-px before:content-[''] before:[background:linear-gradient(135deg,rgb(1_65_28/0.3),transparent_50%,rgb(0_0_0/0.05))];
+    @apply relative;
   }
 
   .text-gradient {
-    @apply bg-gradient-to-r from-brand-900 to-brand-600 bg-clip-text text-transparent dark:from-white dark:to-brand-400;
+    @apply text-brand-900 dark:text-white;
   }
 
-  .kpi-shine {
-    background: linear-gradient(105deg, transparent 40%, rgb(255 255 255 / 0.08) 50%, transparent 60%);
+  .num {
+    @apply tabular-nums tracking-tight;
+  }
+
+  /* Tables share one look across every back-office page. */
+  .data-table {
+    @apply w-full text-sm;
+  }
+  .data-table thead tr {
+    @apply border-b border-brand-200 bg-brand-50 text-start text-xs font-medium text-brand-500 dark:border-brand-800 dark:bg-brand-900/60 dark:text-brand-400;
+  }
+  .data-table th {
+    @apply whitespace-nowrap px-4 py-2.5 font-medium;
+  }
+  .data-table td {
+    @apply px-4 py-3 align-middle;
+  }
+  .data-table tbody tr {
+    @apply border-b border-brand-100 transition-colors last:border-0 hover:bg-brand-50/70 dark:border-brand-800/70 dark:hover:bg-brand-800/30;
+  }
+
+  .skeleton {
+    @apply rounded-md bg-brand-200/70 dark:bg-brand-800/70;
+    background-image: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.5) 50%, transparent 100%);
     background-size: 200% 100%;
+    animation: shimmer 1.6s linear infinite;
+  }
+  .dark .skeleton {
+    background-image: linear-gradient(90deg, transparent 0%, rgb(255 255 255 / 0.05) 50%, transparent 100%);
+  }
+
+  /* Thermal-receipt tear line at the bottom of the bill. */
+  .receipt-tear {
+    height: 10px;
+    background:
+      radial-gradient(circle at 5px -1px, transparent 5px, theme('colors.white') 5.5px) repeat-x;
+    background-size: 10px 10px;
+  }
+  .dark .receipt-tear {
+    background:
+      radial-gradient(circle at 5px -1px, transparent 5px, theme('colors.brand.900') 5.5px) repeat-x;
+    background-size: 10px 10px;
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 }
 
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -58,9 +140,19 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply rounded-full bg-brand-300/80 dark:bg-brand-700/80;
+  @apply rounded-full border-2 border-solid border-transparent bg-brand-300 bg-clip-padding dark:bg-brand-700;
 }
 
 ::selection {
   @apply bg-accent/20 text-brand-900 dark:text-white;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

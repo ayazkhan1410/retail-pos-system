@@ -1,7 +1,12 @@
 from django.urls import path
 
 from sales.views import (
-    CloseShiftView, CurrentShiftView, DashboardView, OpenShiftView, ReturnCreateView, SaleListCreateView,
+    CloseShiftView,
+    CurrentShiftView,
+    DashboardView,
+    OpenShiftView,
+    ReturnCreateView,
+    SaleListCreateView,
     TerminalListView,
 )
 

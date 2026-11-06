@@ -222,9 +222,8 @@ def _post_return(user, data):
         shift = Shift.objects.filter(terminal=terminal, closed_at__isnull=True).first()
         if not shift:
             _reject(f'{terminal.name} has no open shift to refund cash from.')
-    if method == Payment.Method.CREDIT:
-        if sale is None or not sale.customer_id:
-            _reject('Credit refunds need the original invoice with a customer.')
+    if method == Payment.Method.CREDIT and (sale is None or not sale.customer_id):
+        _reject('Credit refunds need the original invoice with a customer.')
 
     invoice_rows = []
     walk_in_rows = []

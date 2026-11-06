@@ -1,8 +1,13 @@
 from django.urls import path
 
 from inventory.views import (
-    AdjustStockView, CategoryListView, CurrentBranchView, ImportProductsView, ProductDetailView,
-    ProductListCreateView, WriteOffExpiredView,
+    AdjustStockView,
+    CategoryListView,
+    CurrentBranchView,
+    ImportProductsView,
+    ProductDetailView,
+    ProductListCreateView,
+    WriteOffExpiredView,
 )
 
 urlpatterns = [

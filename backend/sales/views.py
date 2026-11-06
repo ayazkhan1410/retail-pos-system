@@ -14,7 +14,12 @@ from auth.permissions import requires
 from inventory.models import Product, StockLevel, default_branch
 from sales.models import Payment, Sale, SaleLine, SaleReturn, Shift, Terminal
 from sales.serializers import (
-    ReturnInputSerializer, ReturnSerializer, SaleInputSerializer, SaleSerializer, ShiftSerializer, TerminalSerializer,
+    ReturnInputSerializer,
+    ReturnSerializer,
+    SaleInputSerializer,
+    SaleSerializer,
+    ShiftSerializer,
+    TerminalSerializer,
 )
 from sales.services import close_shift, create_return, create_sale, open_shift
 

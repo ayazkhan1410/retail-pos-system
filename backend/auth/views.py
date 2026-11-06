@@ -65,7 +65,7 @@ class SwitchByPinView(APIView):
     def post(self, request):
         pin = str(request.data.get('pin', '')).strip()
         if not pin.isdigit() or not (4 <= len(pin) <= 6):
-            return Response({'detail': 'Enter a 4–6 digit PIN.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'detail': 'Enter a 4-6 digit PIN.'}, status=status.HTTP_400_BAD_REQUEST)
         for user in CustomUser.objects.filter(is_active=True).exclude(pin='').iterator(chunk_size=100):
             if check_password(pin, user.pin):
                 login(request, user)

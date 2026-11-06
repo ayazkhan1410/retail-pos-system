@@ -73,8 +73,12 @@ class Product(models.Model):
 
     costing_method = models.CharField(max_length=20, choices=Costing.choices, default=Costing.RECENT)
     cost = money_field()
-    # Shelf price, including sales tax.
+    # Shelf / MRP, including sales tax.
     price = money_field()
+    # Till rate when set; otherwise price (after item discount) is charged.
+    sale_rate = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True, validators=NON_NEGATIVE,
+    )
     sales_tax_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0, validators=PERCENT)
     pct_code = models.CharField('PCT code', max_length=20, blank=True, help_text='FBR tariff code')
     disc_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0, validators=PERCENT)
@@ -104,12 +108,27 @@ class Product(models.Model):
         return bool(self.expiry_date and self.expiry_date < timezone.localdate())
 
     def sale_price(self):
-        """Shelf price after this item's own discount, if one is running today."""
+        """Amount charged at the till: sale_rate if set, else shelf price after item discount."""
+        if self.sale_rate is not None:
+            return Decimal(self.sale_rate).quantize(CENT, ROUND_HALF_UP)
         today = timezone.localdate()
         if (self.disc_start and today < self.disc_start) or (self.disc_end and today > self.disc_end):
             return self.price
         reduced = self.price * (100 - self.disc_percent) / 100 - self.disc_amount
         return max(reduced, Decimal(0)).quantize(CENT, ROUND_HALF_UP)
+
+
+class ProductBarcode(models.Model):
+    """Extra barcodes that resolve to the same product (supplier / OEM packs)."""
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='extra_barcodes')
+    barcode = models.CharField(max_length=64, unique=True)
+
+    class Meta:
+        ordering = ['barcode']
+
+    def __str__(self):
+        return self.barcode
 
 
 class StockLevel(models.Model):

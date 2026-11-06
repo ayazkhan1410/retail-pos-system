@@ -2,8 +2,8 @@ import api from './api';
 import type { PaginatedSuppliersResponse, SupplierApi, SupplierListParams } from './suppliers';
 import type { ProductApi } from './products';
 import type {
-  Branch, Customer, DashboardData, Expense, FinancialReport, GRN, GRNPreview, Insights, LedgerEntry, RoleMatrix,
-  Sale, Shift, Terminal, User,
+  AppNotification, Branch, Customer, DashboardData, Expense, FinancialReport, GRN, GRNPreview, Insights, LedgerEntry,
+  NotificationListResponse, RoleMatrix, Sale, Shift, Terminal, User,
 } from '@/types';
 
 export interface HealthCheckResponse {
@@ -38,6 +38,7 @@ export const authApi = {
   session: () => api.get<{ user: User | null }>('/auth/session/'),
   login: (email: string, password: string) => api.post<{ user: User }>('/auth/login/', { email, password }),
   logout: () => api.post('/auth/logout/'),
+  switchPin: (pin: string) => api.post<{ user: User }>('/auth/switch-pin/', { pin }),
   users: () => api.get<User[]>('/auth/users/'),
   createUser: (data: UserInput) => api.post<User>('/auth/users/', data),
   updateUser: (id: number, data: UserInput) => api.patch<User>(`/auth/users/${id}/`, data),
@@ -139,6 +140,7 @@ export const purchasesApi = {
   update: (id: number, data: GRN) => api.put<GRN>(`/purchases/${id}/`, data),
   remove: (id: number) => api.delete(`/purchases/${id}/`),
   post: (id: number) => api.post<GRN>(`/purchases/${id}/post/`),
+  void: (id: number, reason = '') => api.post<GRN>(`/purchases/${id}/void/`, { reason }),
   preview: (data: GRN) => api.post<GRNPreview>('/purchases/preview/', data),
 };
 
@@ -149,3 +151,19 @@ export const financeApi = {
   report: (from: string, to: string) => api.get<FinancialReport>('/finance/report/', { params: { from, to } }),
   insights: () => api.get<Insights>('/finance/insights/'),
 };
+
+export const notificationsApi = {
+  list: (params?: { page?: number; page_size?: number; unread?: boolean }) =>
+    api.get<NotificationListResponse>('/notifications/', {
+      params: {
+        page: params?.page,
+        page_size: params?.page_size,
+        unread: params?.unread ? '1' : undefined,
+      },
+    }),
+  unreadCount: () => api.get<{ unread_count: number }>('/notifications/unread-count/'),
+  markRead: (ids: number[]) => api.post<{ updated: number }>('/notifications/mark-read/', { ids }),
+  markAllRead: () => api.post<{ updated: number }>('/notifications/mark-all-read/'),
+};
+
+export type { AppNotification };

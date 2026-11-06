@@ -106,3 +106,53 @@ def post_grn(grn_id, user):
     grn.save()
     log_event(user, 'grn_posted', grn.number, {'supplier': grn.supplier.name, 'total': str(grn.total)})
     return grn
+
+
+@transaction.atomic
+def void_grn(grn_id, user, reason=''):
+    """Reverse a posted GRN: pull stock back out and credit the supplier ledger."""
+    grn = GRN.objects.select_for_update().filter(pk=grn_id).first()
+    if not grn or grn.status != GRN.Status.POSTED:
+        raise ValidationError({'detail': 'Only a posted GRN can be voided.'})
+    for line in sorted(grn.lines.select_related('product'), key=lambda item: item.product_id):
+        units = line.qty + line.free
+        move_stock(line.product, grn.branch, -units, StockMovement.Reason.ADJUSTMENT, user, f'VOID-{grn.number}')
+    if grn.payment_type == PaymentType.CREDIT:
+        post_supplier_entry(
+            grn.supplier_id, -grn.total, SupplierLedgerEntry.Kind.PURCHASE, user,
+            reference=f'VOID-{grn.number}',
+        )
+    grn.status = GRN.Status.VOIDED
+    grn.void_reason = reason or 'Voided'
+    grn.voided_by = user
+    grn.voided_at = timezone.now()
+    grn.save(update_fields=['status', 'void_reason', 'voided_by', 'voided_at'])
+    log_event(user, 'grn_voided', grn.number, {'reason': grn.void_reason, 'total': str(grn.total)})
+    return grn
+
+
+@transaction.atomic
+def post_purchase_return(return_id, user):
+    """Ship stock back to the supplier and reduce what we owe them."""
+    from purchases.models import PurchaseReturn
+
+    row = PurchaseReturn.objects.select_for_update().filter(pk=return_id).first()
+    if not row or row.status != PurchaseReturn.Status.DRAFT:
+        raise ValidationError({'detail': 'This purchase return is not a draft.'})
+    lines = list(row.lines.select_related('product'))
+    if not lines:
+        raise ValidationError({'detail': 'Add at least one line.'})
+    sequence = PurchaseReturn.objects.filter(status=PurchaseReturn.Status.POSTED).count() + 1
+    row.number = f'PR-{sequence:06d}'
+    total = Decimal(0)
+    for line in sorted(lines, key=lambda item: item.product_id):
+        move_stock(line.product, row.branch, -line.quantity, StockMovement.Reason.ADJUSTMENT, user, row.number)
+        total += line.line_total
+    post_supplier_entry(row.supplier_id, -total, SupplierLedgerEntry.Kind.PURCHASE, user, reference=row.number)
+    row.total = _money(total)
+    row.status = PurchaseReturn.Status.POSTED
+    row.posted_by = user
+    row.posted_at = timezone.now()
+    row.save()
+    log_event(user, 'purchase_returned', row.number, {'supplier': row.supplier.name, 'total': str(row.total)})
+    return row

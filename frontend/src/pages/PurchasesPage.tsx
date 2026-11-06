@@ -50,7 +50,7 @@ export default function PurchasesPage() {
   const [saving, setSaving] = useState(false);
   const previewRun = useRef(0);
 
-  const readOnly = grn.status === 'posted' || !can('purchases.edit');
+  const readOnly = grn.status === 'posted' || grn.status === 'voided' || !can('purchases.edit');
   const supplier = suppliers.find((item) => Number(item.id) === grn.supplier);
 
   const loadHistory = useCallback(() => {
@@ -159,6 +159,18 @@ export default function PurchasesPage() {
     });
   };
 
+  const voidPosted = () => {
+    if (!grn.id || grn.status !== 'posted') return;
+    if (!window.confirm(t('purchases.confirmVoid'))) return;
+    void run(async () => {
+      const { data } = await purchasesApi.void(grn.id!, t('purchases.voidDefaultReason'));
+      setGrn(data);
+      await fetchProducts();
+      loadSuppliers();
+      return t('purchases.voided', { number: data.number ?? '' });
+    });
+  };
+
   const removeDraft = () => {
     if (!grn.id || !window.confirm(t('purchases.confirmDelete'))) return;
     void run(async () => {
@@ -199,10 +211,21 @@ export default function PurchasesPage() {
       <main className="page-bg flex-1 overflow-y-auto p-4 lg:p-6">
         {message && <p role="status" className="mb-4 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">{message}</p>}
         {error && <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</p>}
-        {grn.status === 'posted' && (
-          <div className="mb-4 flex items-center justify-between rounded-xl bg-brand-100 px-4 py-2 text-sm dark:bg-brand-800/50">
-            <span>{t('purchases.viewingPosted', { number: grn.number ?? '' })}</span>
-            <Button variant="ghost" size="sm" onClick={() => setGrn(emptyGrn())}><X className="h-4 w-4" /></Button>
+        {(grn.status === 'posted' || grn.status === 'voided') && (
+          <div className="mb-4 flex items-center justify-between gap-2 rounded-xl bg-brand-100 px-4 py-2 text-sm dark:bg-brand-800/50">
+            <span>
+              {grn.status === 'voided'
+                ? t('purchases.viewingVoided', { number: grn.number ?? '' })
+                : t('purchases.viewingPosted', { number: grn.number ?? '' })}
+            </span>
+            <div className="flex items-center gap-1">
+              {grn.status === 'posted' && can('purchases.edit') && (
+                <Button variant="ghost" size="sm" onClick={voidPosted} disabled={saving}>
+                  {t('purchases.voidGrn')}
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={() => setGrn(emptyGrn())}><X className="h-4 w-4" /></Button>
+            </div>
           </div>
         )}
 

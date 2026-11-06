@@ -13,9 +13,15 @@ class GRN(models.Model):
     class Status(models.TextChoices):
         DRAFT = 'draft', 'Draft'
         POSTED = 'posted', 'Posted'
+        VOIDED = 'voided', 'Voided'
 
     number = models.CharField(max_length=20, unique=True, null=True, blank=True)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT, db_index=True)
+    void_reason = models.CharField(max_length=255, blank=True)
+    voided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name='+',
+    )
+    voided_at = models.DateTimeField(null=True, blank=True)
     branch = models.ForeignKey(Branch, on_delete=models.PROTECT)
     supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='grns')
     date = models.DateField()
@@ -56,3 +62,37 @@ class GRNLine(models.Model):
     line_total = _money()
     unit_cost = _money()
     margin_percent = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+
+
+class PurchaseReturn(models.Model):
+    """Stock sent back to a supplier (against a posted GRN when possible)."""
+
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Draft'
+        POSTED = 'posted', 'Posted'
+
+    number = models.CharField(max_length=20, unique=True, null=True, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT, db_index=True)
+    branch = models.ForeignKey(Branch, on_delete=models.PROTECT)
+    supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='purchase_returns')
+    grn = models.ForeignKey(GRN, null=True, blank=True, on_delete=models.PROTECT, related_name='purchase_returns')
+    date = models.DateField()
+    reason = models.CharField(max_length=255, blank=True)
+    total = _money()
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    posted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name='+',
+    )
+    posted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-id']
+
+
+class PurchaseReturnLine(models.Model):
+    purchase_return = models.ForeignKey(PurchaseReturn, on_delete=models.CASCADE, related_name='lines')
+    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+    quantity = models.DecimalField(max_digits=12, decimal_places=3)
+    rate = models.DecimalField(max_digits=14, decimal_places=2)
+    line_total = _money()

@@ -134,21 +134,42 @@ def void_grn(grn_id, user, reason=''):
 @transaction.atomic
 def post_purchase_return(return_id, user):
     """Ship stock back to the supplier and reduce what we owe them."""
+    from inventory.models import StockLevel
     from purchases.models import PurchaseReturn
 
+    # No select_related on nullable grn — Postgres rejects FOR UPDATE with outer joins.
     row = PurchaseReturn.objects.select_for_update().filter(pk=return_id).first()
     if not row or row.status != PurchaseReturn.Status.DRAFT:
         raise ValidationError({'detail': 'This purchase return is not a draft.'})
     lines = list(row.lines.select_related('product'))
     if not lines:
         raise ValidationError({'detail': 'Add at least one line.'})
+    for line in sorted(lines, key=lambda item: item.product_id):
+        if line.rate > line.product.price and line.rate > line.product.cost:
+            raise ValidationError({
+                'detail': f'{line.product.name}: return rate cannot exceed shelf price or cost.',
+            })
+        level = StockLevel.objects.select_for_update().filter(product=line.product, branch=row.branch).first()
+        on_hand = level.quantity if level else Decimal(0)
+        if line.quantity > on_hand:
+            raise ValidationError({
+                'detail': f'{line.product.name}: only {on_hand:g} on hand to return.',
+            })
     sequence = PurchaseReturn.objects.filter(status=PurchaseReturn.Status.POSTED).count() + 1
     row.number = f'PR-{sequence:06d}'
     total = Decimal(0)
     for line in sorted(lines, key=lambda item: item.product_id):
         move_stock(line.product, row.branch, -line.quantity, StockMovement.Reason.ADJUSTMENT, user, row.number)
         total += line.line_total
-    post_supplier_entry(row.supplier_id, -total, SupplierLedgerEntry.Kind.PURCHASE, user, reference=row.number)
+    # Only credit purchases adjust supplier balance (cash buys were already settled).
+    grn = row.grn
+    supplier = row.supplier
+    credit_return = (
+        (grn is not None and grn.payment_type == PaymentType.CREDIT)
+        or (grn is None and supplier.payment_type == PaymentType.CREDIT)
+    )
+    if credit_return:
+        post_supplier_entry(row.supplier_id, -total, SupplierLedgerEntry.Kind.PURCHASE, user, reference=row.number)
     row.total = _money(total)
     row.status = PurchaseReturn.Status.POSTED
     row.posted_by = user

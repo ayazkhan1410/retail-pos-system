@@ -55,6 +55,15 @@ class LogoutView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+_PIN_ROLE_RANK = {
+    'cashier': 1,
+    'stock_keeper': 1,
+    'accountant': 2,
+    'manager': 3,
+    'owner': 4,
+}
+
+
 class SwitchByPinView(APIView):
     """Quick cashier switch on an open till — PIN only, no email/password."""
 
@@ -66,11 +75,25 @@ class SwitchByPinView(APIView):
         pin = str(request.data.get('pin', '')).strip()
         if not pin.isdigit() or not (4 <= len(pin) <= 6):
             return Response({'detail': 'Enter a 4-6 digit PIN.'}, status=status.HTTP_400_BAD_REQUEST)
+        actor = request.user
+        actor_rank = 4 if actor.is_owner else _PIN_ROLE_RANK.get(actor.role or '', 0)
         for user in CustomUser.objects.filter(is_active=True).exclude(pin='').iterator(chunk_size=100):
-            if check_password(pin, user.pin):
-                login(request, user)
-                log_event(user, 'login', user.email, {'via': 'pin'})
-                return Response({'user': UserSerializer(user).data})
+            if not check_password(pin, user.pin):
+                continue
+            # PIN switch is for till staff only — never a path onto owner/superuser.
+            if user.is_superuser or user.role == 'owner':
+                return Response({'detail': 'Incorrect PIN.'}, status=status.HTTP_400_BAD_REQUEST)
+            if not user.can('pos.sell'):
+                return Response({'detail': 'Incorrect PIN.'}, status=status.HTTP_400_BAD_REQUEST)
+            target_rank = _PIN_ROLE_RANK.get(user.role or '', 0)
+            if target_rank > actor_rank:
+                return Response(
+                    {'detail': 'That PIN belongs to a higher role. Sign in with email instead.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            login(request, user)
+            log_event(user, 'login', user.email, {'via': 'pin'})
+            return Response({'user': UserSerializer(user).data})
         return Response({'detail': 'Incorrect PIN.'}, status=status.HTTP_400_BAD_REQUEST)
 
 

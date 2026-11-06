@@ -88,8 +88,9 @@ class ReturnCreateView(APIView):
         data = ReturnInputSerializer(data=request.data)
         data.is_valid(raise_exception=True)
         sale_return, created = create_return(request.user, data.validated_data)
+        sale_payload = SaleSerializer(sale_return.sale).data if sale_return.sale_id else None
         return Response(
-            {'return': ReturnSerializer(sale_return).data, 'sale': SaleSerializer(sale_return.sale).data},
+            {'return': ReturnSerializer(sale_return).data, 'sale': sale_payload},
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 

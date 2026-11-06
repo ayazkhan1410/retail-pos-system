@@ -32,7 +32,10 @@ export const systemApi = {
   backupDatabase: () => api.post<BackupResponse>('/system/backup/'),
 };
 
-export type UserInput = Partial<Omit<User, 'id' | 'permissions'>> & { password?: string };
+export type UserInput = Partial<Omit<User, 'id' | 'permissions' | 'has_pin'>> & {
+  password?: string;
+  pin?: string;
+};
 
 export const authApi = {
   session: () => api.get<{ user: User | null }>('/auth/session/'),
@@ -91,11 +94,15 @@ export const salesApi = {
   create: (data: NewSale) => api.post<Sale>('/sales/', data),
   createReturn: (data: {
     client_uuid: string;
-    sale: number;
+    sale?: number | null;
+    terminal?: number;
     method: string;
     reason?: string;
-    lines: { sale_line: number; quantity: string; restock: boolean }[];
-  }) => api.post<{ sale: Sale }>('/sales/returns/', data),
+    lines: Array<
+      | { sale_line: number; quantity: string; restock: boolean }
+      | { product: number; quantity: string; restock: boolean; unit_price?: string }
+    >;
+  }) => api.post<{ return: { id: number; number: string; total: string }; sale: Sale | null }>('/sales/returns/', data),
   terminals: () => api.get<Terminal[]>('/sales/terminals/'),
   currentShift: (terminalId: number) => api.get<{ shift: Shift | null }>(`/sales/terminals/${terminalId}/shift/`),
   openShift: (terminal: number, openingCash: string) =>
@@ -134,6 +141,28 @@ export const customersApi = {
     api.post<Customer>(`/customers/${id}/ledger/`, data),
 };
 
+export interface PurchaseReturnPayload {
+  supplier: number;
+  grn?: number | null;
+  date: string;
+  reason?: string;
+  lines: { product: number; quantity: string; rate: string }[];
+}
+
+export interface PurchaseReturnRow {
+  id: number;
+  number: string | null;
+  status: 'draft' | 'posted';
+  supplier: number;
+  supplier_name: string;
+  grn: number | null;
+  grn_number?: string;
+  date: string;
+  reason: string;
+  total: string;
+  lines: { product: number; product_name: string; barcode: string; quantity: string; rate: string; line_total: string }[];
+}
+
 export const purchasesApi = {
   list: () => api.get<{ results: GRN[] }>('/purchases/'),
   create: (data: GRN) => api.post<GRN>('/purchases/', data),
@@ -142,6 +171,10 @@ export const purchasesApi = {
   post: (id: number) => api.post<GRN>(`/purchases/${id}/post/`),
   void: (id: number, reason = '') => api.post<GRN>(`/purchases/${id}/void/`, { reason }),
   preview: (data: GRN) => api.post<GRNPreview>('/purchases/preview/', data),
+  listReturns: () => api.get<{ results: PurchaseReturnRow[] }>('/purchases/returns/'),
+  createReturn: (data: PurchaseReturnPayload) => api.post<PurchaseReturnRow>('/purchases/returns/', data),
+  postReturn: (id: number) => api.post<PurchaseReturnRow>(`/purchases/returns/${id}/post/`),
+  removeReturn: (id: number) => api.delete(`/purchases/returns/${id}/`),
 };
 
 export const financeApi = {

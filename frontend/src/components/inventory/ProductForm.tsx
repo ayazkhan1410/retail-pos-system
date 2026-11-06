@@ -174,6 +174,27 @@ export default function ProductForm({ product, onSubmit }: ProductFormProps) {
         required
       />
 
+      <Input
+        label={t('inventory.saleRate')}
+        type="number"
+        min={0}
+        step="0.01"
+        value={form.saleRate ?? ''}
+        onChange={(e) => set('saleRate', e.target.value === '' ? undefined : Number(e.target.value))}
+        placeholder={t('inventory.saleRateHint')}
+      />
+
+      <Input
+        label={t('inventory.extraBarcodes')}
+        value={(form.extraBarcodes ?? []).join(', ')}
+        onChange={(e) => set(
+          'extraBarcodes',
+          e.target.value.split(/[\s,]+/).map((code) => code.trim()).filter(Boolean),
+        )}
+        placeholder={t('inventory.extraBarcodesHint')}
+        className="sm:col-span-2"
+      />
+
       <div className="sm:col-span-2 rounded-xl border border-brand-200/80 bg-brand-50/50 p-4 dark:border-brand-700 dark:bg-brand-800/30">
         <p className="mb-3 text-sm font-medium text-brand-800 dark:text-brand-200">
           {t('inventory.barcodeSource')}

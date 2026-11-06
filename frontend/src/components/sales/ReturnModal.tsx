@@ -32,7 +32,8 @@ export default function ReturnModal({ sale, onClose, onDone }: { sale: Sale; onC
     setError('');
     try {
       const { data } = await salesApi.createReturn({ client_uuid: uuid.current, sale: sale.id, method, reason, lines });
-      onDone(data.sale);
+      if (data.sale) onDone(data.sale);
+      else onClose();
     } catch (err) {
       setError(apiErrorMessage(err, t('sales.returnFailed')));
       setSaving(false);

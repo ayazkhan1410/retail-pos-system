@@ -15,6 +15,7 @@ import {
   Lock,
   WifiOff,
   Printer,
+  KeyRound,
 } from 'lucide-react';
 import { homePath, usePOSStore, useInventoryStore, useAuthStore, useCan } from '@/store';
 import { useKeyboardShortcut } from '@/hooks';
@@ -27,6 +28,7 @@ import { auditApi, customersApi, salesApi } from '@/services/endpoints';
 import CashQuickModal from '@/components/pos/CashQuickModal';
 import ChangeFlash from '@/components/pos/ChangeFlash';
 import PaymentModal, { type PaymentResult } from '@/components/pos/PaymentModal';
+import PinSwitchModal from '@/components/pos/PinSwitchModal';
 import { CloseShiftModal, OpenShiftModal, ShiftSummaryModal } from '@/components/pos/ShiftModals';
 import type { CartItem, Customer, PaymentMethod, Product, Sale, Shift, Terminal } from '@/types';
 import { useTranslation } from '@/i18n';
@@ -140,6 +142,7 @@ export default function POSPage() {
   const [productSearch, setProductSearch] = useState('');
   const [scanFlash, setScanFlash] = useState(false);
   const [notice, setNotice] = useState<{ text: string; kind: 'warning' | 'error' } | null>(null);
+  const [pinSwitchOpen, setPinSwitchOpen] = useState(false);
   const scannerRef = useRef<HTMLInputElement>(null);
   // Kept until the bill changes, so a retry after a lost reply can't charge the customer twice.
   const saleUuid = useRef(newUuid());
@@ -480,6 +483,15 @@ export default function POSPage() {
           <span className="hidden max-w-[120px] truncate text-xs text-brand-400 lg:inline">{user?.full_name}</span>
           <button
             type="button"
+            onClick={() => setPinSwitchOpen(true)}
+            aria-label={t('pos.switchCashier')}
+            title={t('pos.switchCashier')}
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white/70 hover:bg-white/20"
+          >
+            <KeyRound className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
             onClick={() => void logout()}
             aria-label={t('common.logout')}
             title={t('common.logout')}
@@ -489,6 +501,7 @@ export default function POSPage() {
           </button>
         </div>
       </header>
+      <PinSwitchModal open={pinSwitchOpen} onClose={() => setPinSwitchOpen(false)} />
 
       {/* Universal scan / search — always on top, full width */}
       <form onSubmit={handleScannerSubmit} className="shrink-0 border-b border-white/10 p-2">

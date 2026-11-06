@@ -246,9 +246,8 @@ def _post_return(user, data):
             product = item.get('product')
             if product is None:
                 _reject('Pick a product to return.')
-            unit_price = item.get('unit_price')
-            if unit_price is None:
-                unit_price = product.sale_price()
+            # Never trust client refund price — walk-in refunds use today's catalog till price.
+            unit_price = product.sale_price()
             amount = _money(Decimal(unit_price) * item['quantity'])
             walk_in_rows.append((product, item['quantity'], item.get('restock', True), amount, Decimal(unit_price)))
 

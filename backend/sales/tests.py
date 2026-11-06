@@ -231,14 +231,25 @@ class ReportTests(TestCase):
 class ConcurrencyTests(TransactionTestCase):
     """Two tills hitting the server at once, on real connections."""
 
-    serialized_rollback = True  # keeps the migration-created branch and terminals between tests
-
+    # Avoid serialized_rollback: other TransactionTestCases leave contenttypes that
+    # clash with Django's deserialize of the post-migrate snapshot (UniqueViolation).
     def setUp(self):
-        self.user = make_user()
-        self.terminals = [Terminal.objects.get(code='C1'), Terminal.objects.get(code='C2')]
-        for terminal in self.terminals:
+        from auth.catalog import DEFAULT_ROLE_PERMISSIONS
+        from auth.models import RolePermission
+        from inventory.models import Branch, Category
+
+        for role, codes in DEFAULT_ROLE_PERMISSIONS.items():
+            for code in codes:
+                RolePermission.objects.get_or_create(role=role, permission=code)
+        branch, _ = Branch.objects.get_or_create(code='01', defaults={'name': 'Main Branch'})
+        Category.objects.get_or_create(name='GROCERY')
+        self.user = make_user(email=f'conc-{uuid.uuid4().hex[:8]}@test.local')
+        self.terminals = []
+        for code, name in (('C1', 'Counter 1'), ('C2', 'Counter 2')):
+            terminal, _ = Terminal.objects.get_or_create(branch=branch, code=code, defaults={'name': name})
+            self.terminals.append(terminal)
             Shift.objects.create(terminal=terminal, opened_by=self.user, opening_cash=0)
-        self.product = make_product(self.user, stock=100)
+        self.product = make_product(self.user, stock=100, barcode=f'9{uuid.uuid4().hex[:11]}')
 
     def post_sales(self, payloads):
         results, barrier = [], threading.Barrier(len(payloads))
@@ -381,6 +392,30 @@ class ReturnTests(TestCase):
         self.give_back()
         self.assertEqual(self.client.get('/api/sales/dashboard/').data['today_revenue'], 90)
 
+    def test_walk_in_return_without_invoice(self):
+        before = stock_of(self.product)
+        response = self.client.post('/api/sales/returns/', {
+            'client_uuid': str(uuid.uuid4()),
+            'terminal': self.terminal.pk,
+            'method': 'cash',
+            'reason': 'No receipt',
+            'lines': [{'product': self.product.pk, 'quantity': '1', 'restock': True}],
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertIsNone(response.data['sale'])
+        self.assertEqual(Decimal(response.data['return']['total']), 100)
+        self.assertEqual(stock_of(self.product), before + 1)
+
+    def test_walk_in_return_ignores_inflated_client_price(self):
+        response = self.client.post('/api/sales/returns/', {
+            'client_uuid': str(uuid.uuid4()),
+            'terminal': self.terminal.pk,
+            'method': 'cash',
+            'lines': [{'product': self.product.pk, 'quantity': '1', 'unit_price': '9999', 'restock': True}],
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Decimal(response.data['return']['total']), 100)
+
 
 class OfflineSaleTests(TestCase):
     def setUp(self):
@@ -414,6 +449,24 @@ class OfflineSaleTests(TestCase):
         response = self.sync(unit_price='100')
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(Sale.objects.get().shift_id, self.shift.pk)
+
+    def test_offline_credit_sale_updates_customer_balance(self):
+        from customers.models import Customer
+
+        customer = Customer.objects.create(name='Khata Ali', phone='03001112222', credit_limit=Decimal(5000))
+        response = self.client.post('/api/sales/', {
+            'client_uuid': str(uuid.uuid4()),
+            'terminal': self.terminal.pk,
+            'offline': True,
+            'sold_at': (timezone.now() - timedelta(hours=1)).isoformat(),
+            'customer': customer.pk,
+            'lines': [{'product': self.product.pk, 'quantity': '1', 'unit_price': '100'}],
+            'payments': [{'method': 'credit', 'amount': '100'}],
+        }, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(response.data['is_offline'])
+        customer.refresh_from_db()
+        self.assertEqual(customer.balance, Decimal(100))
 
     def test_client_price_is_ignored_unless_offline(self):
         response = self.client.post('/api/sales/', {

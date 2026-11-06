@@ -72,7 +72,8 @@ services:
       find /backups -name "auto-*.sql" -mtime +14 -delete;
       sleep 86400; done'
     depends_on:
-      db:
+      # Wait for migrations, or the first backup would be of an empty database.
+      backend:
         condition: service_healthy
     restart: unless-stopped
 

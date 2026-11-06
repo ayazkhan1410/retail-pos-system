@@ -210,48 +210,80 @@ def close_shift(user, shift_id, counted_cash):
 
 @transaction.atomic
 def _post_return(user, data):
-    sale = data['sale']
-    terminal = Terminal.objects.select_for_update().select_related('branch').get(pk=(data.get('terminal') or sale.terminal).pk)
+    sale = data.get('sale')
+    if not data.get('terminal') and sale is None:
+        _reject('Choose a counter for this return.')
+    terminal = Terminal.objects.select_for_update().select_related('branch').get(
+        pk=(data.get('terminal') or sale.terminal).pk,
+    )
     method = data['method']
     shift = None
     if method == Payment.Method.CASH:
         shift = Shift.objects.filter(terminal=terminal, closed_at__isnull=True).first()
         if not shift:
             _reject(f'{terminal.name} has no open shift to refund cash from.')
-    if method == Payment.Method.CREDIT and not sale.customer_id:
-        _reject('This sale has no customer to credit.')
+    if method == Payment.Method.CREDIT:
+        if sale is None or not sale.customer_id:
+            _reject('Credit refunds need the original invoice with a customer.')
 
-    rows = []
-    for item in sorted(data['lines'], key=lambda row: row['sale_line'].product_id):
-        line = item['sale_line']
-        if line.sale_id != sale.pk:
-            _reject('That item is not on this invoice.')
-        already = line.return_lines.aggregate(v=Sum('quantity'))['v'] or Decimal(0)
-        if item['quantity'] > line.quantity - already:
-            _reject(f'{line.name}: only {line.quantity - already:g} left to return.')
-        # Refund what was really paid for each unit, bill discount included.
-        rows.append((line, item['quantity'], item.get('restock', True),
-                     _money(line.line_total * item['quantity'] / line.quantity),
-                     _money(line.tax_amount * item['quantity'] / line.quantity)))
-    if not rows:
+    invoice_rows = []
+    walk_in_rows = []
+    for item in data['lines']:
+        sale_line = item.get('sale_line')
+        if sale_line is not None:
+            if sale is None or sale_line.sale_id != sale.pk:
+                _reject('That item is not on this invoice.')
+            already = sale_line.return_lines.aggregate(v=Sum('quantity'))['v'] or Decimal(0)
+            if item['quantity'] > sale_line.quantity - already:
+                _reject(f'{sale_line.name}: only {sale_line.quantity - already:g} left to return.')
+            invoice_rows.append((
+                sale_line,
+                item['quantity'],
+                item.get('restock', True),
+                _money(sale_line.line_total * item['quantity'] / sale_line.quantity),
+                _money(sale_line.tax_amount * item['quantity'] / sale_line.quantity),
+            ))
+        else:
+            product = item.get('product')
+            if product is None:
+                _reject('Pick a product to return.')
+            unit_price = item.get('unit_price')
+            if unit_price is None:
+                unit_price = product.sale_price()
+            amount = _money(Decimal(unit_price) * item['quantity'])
+            walk_in_rows.append((product, item['quantity'], item.get('restock', True), amount, Decimal(unit_price)))
+
+    if not invoice_rows and not walk_in_rows:
         _reject('Choose at least one item to return.')
 
     terminal.last_invoice_seq += 1
     terminal.save(update_fields=['last_invoice_seq'])
-    total = sum((row[3] for row in rows), Decimal(0))
+    total = sum((row[3] for row in invoice_rows), Decimal(0)) + sum((row[3] for row in walk_in_rows), Decimal(0))
+    tax_total = sum((row[4] for row in invoice_rows), Decimal(0))
     sale_return = SaleReturn.objects.create(
         client_uuid=data['client_uuid'],
         number=f'R-{terminal.branch.code}-{terminal.code}-{terminal.last_invoice_seq:06d}',
         sale=sale, terminal=terminal, shift=shift, user=user, method=method, reason=data.get('reason', ''),
-        total=total, tax=sum((row[4] for row in rows), Decimal(0)),
+        total=total, tax=tax_total,
     )
-    for line, quantity, restock, amount, tax in rows:
-        ReturnLine.objects.create(sale_return=sale_return, sale_line=line, quantity=quantity, amount=amount, tax_amount=tax, restocked=restock)
+    for line, quantity, restock, amount, tax in invoice_rows:
+        ReturnLine.objects.create(
+            sale_return=sale_return, sale_line=line, product=line.product,
+            quantity=quantity, amount=amount, tax_amount=tax, restocked=restock,
+        )
         if restock:
             move_stock(line.product, terminal.branch, quantity, StockMovement.Reason.RETURN, user, sale_return.number)
-    if method == Payment.Method.CREDIT:
+    for product, quantity, restock, amount, unit_price in walk_in_rows:
+        ReturnLine.objects.create(
+            sale_return=sale_return, sale_line=None, product=product, unit_price=unit_price,
+            quantity=quantity, amount=amount, tax_amount=Decimal(0), restocked=restock,
+        )
+        if restock:
+            move_stock(product, terminal.branch, quantity, StockMovement.Reason.RETURN, user, sale_return.number)
+    if method == Payment.Method.CREDIT and sale is not None:
         post_customer_entry(sale.customer_id, -total, CustomerLedgerEntry.Kind.RETURN, user, reference=sale_return.number)
-    log_event(user, 'sale_returned', sale.invoice_no, {'return': sale_return.number, 'total': str(total), 'method': method})
+    target = sale.invoice_no if sale is not None else 'walk-in'
+    log_event(user, 'sale_returned', target, {'return': sale_return.number, 'total': str(total), 'method': method})
     return sale_return
 
 

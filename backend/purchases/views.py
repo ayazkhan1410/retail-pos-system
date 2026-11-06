@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from auth.permissions import requires
 from inventory.models import Product, default_branch
 from purchases.models import GRN, GRNLine
-from purchases.services import calculate, post_grn
+from purchases.services import calculate, post_grn, void_grn
 from suppliers.models import PaymentType, Supplier
 
 MONEY = {'max_digits': 14, 'decimal_places': 2, 'min_value': Decimal(0)}
@@ -155,3 +155,11 @@ class GRNPostView(APIView):
 
     def post(self, request, pk):
         return Response(GRNSerializer(post_grn(pk, request.user)).data)
+
+
+class GRNVoidView(APIView):
+    permission_classes = [requires(write='purchases.edit')]
+
+    def post(self, request, pk):
+        reason = str(request.data.get('reason', ''))[:255]
+        return Response(GRNSerializer(void_grn(pk, request.user, reason=reason)).data)

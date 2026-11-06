@@ -8,6 +8,7 @@ import { useCan } from '@/store';
 import { formatCurrency, formatDate } from '@/utils';
 import { printReceipt } from '@/utils/receiptPrint';
 import ReturnModal from '@/components/sales/ReturnModal';
+import WalkInReturnModal from '@/components/sales/WalkInReturnModal';
 import type { Sale, Terminal } from '@/types';
 
 const METHOD_KEYS: Record<string, string> = {
@@ -55,6 +56,7 @@ export default function SalesPage() {
   const [error, setError] = useState(false);
   const [viewing, setViewing] = useState<Sale | null>(null);
   const [returning, setReturning] = useState(false);
+  const [walkInReturn, setWalkInReturn] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -96,10 +98,19 @@ export default function SalesPage() {
       <Header
         title={t('sales.title')}
         subtitle={t('sales.subtitleReal')}
-        actions={can('sales.export') && (
-          <Button variant="outline" size="sm" disabled={sales.length === 0} onClick={() => downloadCsv(sales)}>
-            <Download className="h-4 w-4" /> {t('sales.export')}
-          </Button>
+        actions={(
+          <div className="flex gap-2">
+            {can('returns.create') && (
+              <Button variant="outline" size="sm" onClick={() => setWalkInReturn(true)}>
+                <Undo2 className="h-4 w-4" /> {t('sales.walkInReturn')}
+              </Button>
+            )}
+            {can('sales.export') && (
+              <Button variant="outline" size="sm" disabled={sales.length === 0} onClick={() => downloadCsv(sales)}>
+                <Download className="h-4 w-4" /> {t('sales.export')}
+              </Button>
+            )}
+          </div>
         )}
       />
 
@@ -257,6 +268,16 @@ export default function SalesPage() {
           onDone={(sale) => {
             setReturning(false);
             setViewing(sale);
+            void load(1);
+          }}
+        />
+      )}
+      {walkInReturn && (
+        <WalkInReturnModal
+          terminals={terminals}
+          onClose={() => setWalkInReturn(false)}
+          onDone={() => {
+            setWalkInReturn(false);
             void load(1);
           }}
         />

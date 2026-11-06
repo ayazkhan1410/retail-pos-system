@@ -96,6 +96,7 @@ export interface User {
   role: UserRole;
   is_active: boolean;
   permissions: string[];
+  has_pin?: boolean;
 }
 
 export interface Branch {

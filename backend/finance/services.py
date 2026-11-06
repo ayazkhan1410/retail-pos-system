@@ -169,7 +169,9 @@ def _staff_review(today):
     for row in rows:
         flags = []
         if total_sales and len(rows) > 1:
-            share = lambda field: sum((other[field] for other in rows), ZERO) / total_sales
+            def share(field):
+                return sum((other[field] for other in rows), ZERO) / total_sales
+
             for field in ('discounts', 'returns'):
                 if row['sales'] and row[field] / row['sales'] > 2 * share(field) and row[field] > 0:
                     flags.append(field)

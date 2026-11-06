@@ -1,0 +1,14 @@
+# Django / DRF: permission_classes = [...] is intentional mutable class attr.
+target-version = "py312"
+line-length = 120
+
+[lint]
+select = ["E", "F", "I", "B", "SIM", "RUF", "UP", "FURB"]
+ignore = [
+  "RUF012", # ClassVar lists for DRF permission_classes / Meta
+  "E501",   # line length — existing style is long SQL/strings
+]
+
+[lint.per-file-ignores]
+"**/migrations/*.py" = ["E", "F", "I", "RUF"]
+"**/management/commands/*.py" = ["E402"]

@@ -8,6 +8,7 @@ import { mapSupplierFromApi } from '@/services/suppliers';
 import { useCan, useInventoryStore } from '@/store';
 import { useTranslation } from '@/i18n';
 import { formatCurrency, localDate } from '@/utils';
+import PurchaseReturnPanel from '@/components/purchases/PurchaseReturnPanel';
 import type { GRN, GRNLine, GRNPreview, Product, Supplier } from '@/types';
 
 const emptyGrn = (): GRN => ({
@@ -48,6 +49,7 @@ export default function PurchasesPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
+  const [tab, setTab] = useState<'grn' | 'returns'>('grn');
   const previewRun = useRef(0);
 
   const readOnly = grn.status === 'posted' || grn.status === 'voided' || !can('purchases.edit');
@@ -191,24 +193,38 @@ export default function PurchasesPage() {
       <Header
         title={`GRN — ${t('purchases.title')}`}
         subtitle={t('purchases.subtitle')}
-        actions={!readOnly && (
+        actions={(
           <div className="flex gap-2">
-            {grn.id && (
-              <Button variant="ghost" size="sm" onClick={removeDraft} disabled={saving}>
-                <Trash2 className="h-4 w-4" /> {t('common.delete')}
+            <div className="flex rounded-lg bg-brand-100 p-0.5 dark:bg-brand-800">
+              <Button variant={tab === 'grn' ? 'accent' : 'ghost'} size="sm" onClick={() => setTab('grn')}>
+                {t('purchases.grnTab')}
               </Button>
+              <Button variant={tab === 'returns' ? 'accent' : 'ghost'} size="sm" onClick={() => setTab('returns')}>
+                {t('purchases.returnsTab')}
+              </Button>
+            </div>
+            {tab === 'grn' && !readOnly && (
+              <>
+                {grn.id && (
+                  <Button variant="ghost" size="sm" onClick={removeDraft} disabled={saving}>
+                    <Trash2 className="h-4 w-4" /> {t('common.delete')}
+                  </Button>
+                )}
+                <Button variant="outline" size="sm" onClick={() => void saveDraft()} disabled={!grn.supplier || grn.lines.length === 0} loading={saving}>
+                  <Save className="h-4 w-4" /> {t('purchases.draftSave')}
+                </Button>
+                <Button variant="accent" size="sm" onClick={post} disabled={!grn.supplier || grn.lines.length === 0 || saving}>
+                  {t('purchases.purchaseComplete')}
+                </Button>
+              </>
             )}
-            <Button variant="outline" size="sm" onClick={() => void saveDraft()} disabled={!grn.supplier || grn.lines.length === 0} loading={saving}>
-              <Save className="h-4 w-4" /> {t('purchases.draftSave')}
-            </Button>
-            <Button variant="accent" size="sm" onClick={post} disabled={!grn.supplier || grn.lines.length === 0 || saving}>
-              {t('purchases.purchaseComplete')}
-            </Button>
           </div>
         )}
       />
 
       <main className="page-bg flex-1 overflow-y-auto p-4 lg:p-6">
+        {tab === 'returns' ? <PurchaseReturnPanel /> : (
+          <>
         {message && <p role="status" className="mb-4 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">{message}</p>}
         {error && <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</p>}
         {(grn.status === 'posted' || grn.status === 'voided') && (
@@ -395,6 +411,8 @@ export default function PurchasesPage() {
             ))}
           </div>
         </Card>
+          </>
+        )}
       </main>
     </>
   );

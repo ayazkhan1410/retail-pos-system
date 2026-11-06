@@ -48,7 +48,16 @@ class UserSerializer(serializers.ModelSerializer):
         if value in (None, ''):
             return ''
         if not value.isdigit() or not (4 <= len(value) <= 6):
-            raise serializers.ValidationError('PIN must be 4–6 digits.')
+            raise serializers.ValidationError('PIN must be 4-6 digits.')
+        # Reject reuse so PIN switch cannot hit the wrong account.
+        from django.contrib.auth.hashers import check_password
+
+        others = CustomUser.objects.exclude(pin='').only('id', 'pin')
+        if self.instance is not None:
+            others = others.exclude(pk=self.instance.pk)
+        for other in others.iterator(chunk_size=100):
+            if check_password(value, other.pin):
+                raise serializers.ValidationError('That PIN is already used by another staff member.')
         return value
 
     def create(self, validated_data):

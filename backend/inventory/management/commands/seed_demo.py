@@ -344,7 +344,7 @@ class Command(BaseCommand):
                 .order_by('id')[existing_sales:existing_sales + len(sale_rows)],
             )
             # Fix timestamps across 60 days
-            for idx, sale in enumerate(created):
+            for sale in created:
                 day = now - timedelta(
                     days=rng.randint(0, 59),
                     hours=rng.randint(8, 21),
@@ -440,7 +440,7 @@ class Command(BaseCommand):
         for ago in range(days, -1, -1):
             day = now - timedelta(days=ago)
             latest_hour = now.hour if ago == 0 else 21
-            for terminal, cashier in zip(terminals, cashiers):
+            for terminal, cashier in zip(terminals, cashiers, strict=False):
                 shift = open_shift(cashier, terminal, Decimal(2000))
                 created = []
                 for _ in range(rng.randint(14, 30)):

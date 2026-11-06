@@ -26,6 +26,7 @@ interface AuthState {
   loading: boolean;
   load: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
+  switchPin: (pin: string) => Promise<void>;
   logout: () => Promise<void>;
   clear: () => void;
 }
@@ -43,6 +44,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   login: async (email, password) => {
     const { data } = await authApi.login(email, password);
+    set({ user: data.user });
+  },
+  switchPin: async (pin) => {
+    const { data } = await authApi.switchPin(pin);
     set({ user: data.user });
   },
   logout: async () => {

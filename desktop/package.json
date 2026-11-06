@@ -4,13 +4,44 @@
   "description": "SmartShop POS desktop launcher",
   "main": "main.js",
   "private": true,
+  "author": "SmartShop",
   "scripts": {
     "postinstall": "node scripts/install-electron.js",
     "install:electron": "node scripts/install-electron.js",
     "start": "node scripts/start-electron.js",
-    "dev": "node scripts/start-electron.js"
+    "dev": "node scripts/start-electron.js",
+    "dist:win": "electron-builder --win nsis --x64",
+    "dist:win:dir": "electron-builder --win dir --x64"
+  },
+  "build": {
+    "appId": "pk.smartshop.pos",
+    "productName": "SmartShop POS",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "loading.html",
+      "scripts/**/*",
+      "package.json"
+    ],
+    "extraResources": [],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "SmartShop-POS-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   },
   "devDependencies": {
-    "electron": "^33.2.1"
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
   }
 }

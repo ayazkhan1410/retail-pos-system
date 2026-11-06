@@ -47,7 +47,9 @@ cd e2e && npm install && BASE=http://localhost:3000 PASSWORD=<seed password> nod
 
 ## Backups
 
-`infra/scripts/backup.sh` dumps the database into `backups/`. Settings > Backup Database does the same from the app. Copy these files off the server: a backup on the same disk won't survive that disk failing.
+`infra/scripts/backup.sh` dumps the database into `backups/`. Settings > Backup Database does the same from the app.
+
+Off-site (required for a real shop): set `BACKUP_OFFSITE_DIR` to a USB/NAS path, or `BACKUP_OFFSITE_CMD` to a command that uploads `{{file}}` (rclone/scp/S3). A backup that stays on the same disk will not survive that disk failing.
 
 To restore one into an empty database:
 

@@ -5,10 +5,10 @@ from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
 from audit.models import log_event
-from inventory.models import Branch, Category, Product, StockMovement, default_branch
+from inventory.models import Branch, Category, Product, ProductBarcode, StockMovement, default_branch
 from inventory.services import add_batch, set_stock
 
-AUDITED_FIELDS = ('price', 'cost', 'sales_tax_percent', 'disc_percent', 'disc_amount', 'active')
+AUDITED_FIELDS = ('price', 'sale_rate', 'cost', 'sales_tax_percent', 'disc_percent', 'disc_amount', 'active')
 
 
 class BranchSerializer(serializers.ModelSerializer):
@@ -23,6 +23,9 @@ class ProductSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(source='supplier.name', read_only=True, default='')
     stock = serializers.DecimalField(max_digits=12, decimal_places=3, required=False, min_value=Decimal(0))
     sale_price = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    extra_barcodes = serializers.ListField(
+        child=serializers.CharField(max_length=64), required=False, allow_empty=True,
+    )
 
     class Meta:
         model = Product
@@ -41,15 +44,28 @@ class ProductSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
+        data['extra_barcodes'] = list(instance.extra_barcodes.values_list('barcode', flat=True))
         request = self.context.get('request')
         if request and not request.user.can('products.view_cost'):
             data.pop('cost', None)
         return data
 
+    def _sync_extra_barcodes(self, product, barcodes):
+        barcodes = [code.strip() for code in barcodes if code and code.strip()]
+        primary = product.barcode
+        barcodes = [code for code in barcodes if code != primary]
+        ProductBarcode.objects.filter(product=product).exclude(barcode__in=barcodes).delete()
+        existing = set(ProductBarcode.objects.filter(product=product).values_list('barcode', flat=True))
+        ProductBarcode.objects.bulk_create(
+            [ProductBarcode(product=product, barcode=code) for code in barcodes if code not in existing],
+        )
+
     @transaction.atomic
     def create(self, validated_data):
         stock = validated_data.pop('stock', Decimal(0))
+        extra = validated_data.pop('extra_barcodes', [])
         product = Product.objects.create(**validated_data)
+        self._sync_extra_barcodes(product, extra)
         user = self.context['request'].user
         set_stock(product, default_branch(), stock, StockMovement.Reason.OPENING, user)
         if product.expiry_date and stock > 0:
@@ -62,6 +78,7 @@ class ProductSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         user = self.context['request'].user
         stock = validated_data.pop('stock', None)
+        extra = validated_data.pop('extra_barcodes', None)
         changes = {
             field: [str(getattr(instance, field)), str(validated_data[field])]
             for field in AUDITED_FIELDS
@@ -74,6 +91,8 @@ class ProductSerializer(serializers.ModelSerializer):
             changes['stock'] = [str(instance.stock), str(stock)]
             instance.stock = stock
         product = super().update(instance, validated_data)
+        if extra is not None:
+            self._sync_extra_barcodes(product, extra)
         if changes:
             log_event(user, 'product_updated', product.name, changes)
         return product

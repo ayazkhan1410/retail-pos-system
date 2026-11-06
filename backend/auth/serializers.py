@@ -1,3 +1,4 @@
+from django.contrib.auth.hashers import make_password
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
@@ -6,15 +7,23 @@ from auth.models import CustomUser
 
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False)
+    pin = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=6)
+    has_pin = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
     full_name = serializers.CharField(max_length=150)
 
     class Meta:
         model = CustomUser
-        fields = ('id', 'email', 'full_name', 'phone', 'employee_code', 'role', 'is_active', 'permissions', 'password')
+        fields = (
+            'id', 'email', 'full_name', 'phone', 'employee_code', 'role', 'is_active',
+            'permissions', 'password', 'pin', 'has_pin',
+        )
 
     def get_permissions(self, user):
         return sorted(user.permission_codes)
+
+    def get_has_pin(self, user):
+        return bool(user.pin)
 
     def validate_role(self, value):
         # Staff managers can't hand out the one role that can do everything.
@@ -35,11 +44,28 @@ class UserSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'password': 'Password is required.'})
         return attrs
 
+    def validate_pin(self, value):
+        if value in (None, ''):
+            return ''
+        if not value.isdigit() or not (4 <= len(value) <= 6):
+            raise serializers.ValidationError('PIN must be 4–6 digits.')
+        return value
+
     def create(self, validated_data):
-        return CustomUser.objects.create_user(**validated_data)
+        pin = validated_data.pop('pin', '')
+        user = CustomUser.objects.create_user(**validated_data)
+        if pin:
+            user.pin = make_password(pin)
+            user.save(update_fields=['pin'])
+        return user
 
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
+        pin = validated_data.pop('pin', None)
         if password:
             instance.set_password(password)
-        return super().update(instance, validated_data)
+        user = super().update(instance, validated_data)
+        if pin is not None:
+            user.pin = make_password(pin) if pin else ''
+            user.save(update_fields=['pin'])
+        return user

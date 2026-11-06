@@ -190,44 +190,58 @@ interface InventoryState {
   applySale: (lines: { productId: string; quantity: number }[]) => void;
 }
 
-export const useInventoryStore = create<InventoryState>((set, get) => ({
-  products: [],
-  categories: [],
-  loading: true,
-  error: false,
-  fetchProducts: async () => {
-    try {
-      const [products, categories] = await Promise.all([inventoryApi.products(), inventoryApi.categories()]);
-      set({
-        products: products.data.map(mapProductFromApi),
-        categories: categories.data,
-        loading: false,
-        error: false,
-      });
-    } catch {
-      set({ loading: false, error: true });
-    }
-  },
-  addProduct: async (data) => {
-    const response = await inventoryApi.createProduct(mapProductToApi(data));
-    const product = mapProductFromApi(response.data);
-    set({ products: [...get().products, product] });
-    return product;
-  },
-  updateProduct: async (id, data) => {
-    const existing = get().products.find((p) => p.id === id);
-    const response = await inventoryApi.updateProduct(id, mapProductToApi(data, existing));
-    const updated = mapProductFromApi(response.data);
-    set({ products: get().products.map((p) => (p.id === id ? updated : p)) });
-  },
-  deleteProduct: async (id) => {
-    await inventoryApi.deleteProduct(id);
-    set({ products: get().products.filter((p) => p.id !== id) });
-  },
-  applySale: (lines) => {
-    const sold = new Map(lines.map((line) => [line.productId, line.quantity]));
-    set({
-      products: get().products.map((p) => (sold.has(p.id) ? { ...p, stock: p.stock - sold.get(p.id)! } : p)),
-    });
-  },
-}));
+export const useInventoryStore = create<InventoryState>()(
+  persist(
+    (set, get) => ({
+      products: [],
+      categories: [],
+      loading: true,
+      error: false,
+      fetchProducts: async () => {
+        try {
+          const [products, categories] = await Promise.all([inventoryApi.products(), inventoryApi.categories()]);
+          set({
+            products: products.data.map(mapProductFromApi),
+            categories: categories.data,
+            loading: false,
+            error: false,
+          });
+        } catch {
+          // Keep last good catalog so POS can reload while the server is down.
+          set({ loading: false, error: get().products.length === 0 });
+        }
+      },
+      addProduct: async (data) => {
+        const response = await inventoryApi.createProduct(mapProductToApi(data));
+        const product = mapProductFromApi(response.data);
+        set({ products: [...get().products, product] });
+        return product;
+      },
+      updateProduct: async (id, data) => {
+        const existing = get().products.find((p) => p.id === id);
+        const response = await inventoryApi.updateProduct(id, mapProductToApi(data, existing));
+        const updated = mapProductFromApi(response.data);
+        set({ products: get().products.map((p) => (p.id === id ? updated : p)) });
+      },
+      deleteProduct: async (id) => {
+        await inventoryApi.deleteProduct(id);
+        set({ products: get().products.filter((p) => p.id !== id) });
+      },
+      applySale: (lines) => {
+        const sold = new Map(lines.map((line) => [line.productId, line.quantity]));
+        set({
+          products: get().products.map((p) => (sold.has(p.id) ? { ...p, stock: p.stock - sold.get(p.id)! } : p)),
+        });
+      },
+    }),
+    {
+      name: 'smartshop-catalog-v1',
+      partialize: ({ products, categories }) => ({ products, categories }),
+      onRehydrateStorage: () => (state) => {
+        if (state && state.products.length > 0) {
+          state.loading = false;
+        }
+      },
+    },
+  ),
+);

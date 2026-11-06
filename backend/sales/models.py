@@ -83,6 +83,8 @@ class Payment(AppendOnlyModel):
         EASYPAISA = 'easypaisa', 'Easypaisa'
         CARD = 'card', 'Card'
         CREDIT = 'credit', 'Customer credit'
+        # Recorded payment method only — not a live Raast integration.
+        RAAST = 'raast', 'Raast'
 
     sale = models.ForeignKey(Sale, on_delete=models.PROTECT, related_name='payments')
     method = models.CharField(max_length=20, choices=Method.choices)
@@ -93,7 +95,8 @@ class Payment(AppendOnlyModel):
 class SaleReturn(AppendOnlyModel):
     client_uuid = models.UUIDField(unique=True)
     number = models.CharField(max_length=40, unique=True)
-    sale = models.ForeignKey(Sale, on_delete=models.PROTECT, related_name='returns')
+    # Null = walk-in return without the original invoice.
+    sale = models.ForeignKey(Sale, null=True, blank=True, on_delete=models.PROTECT, related_name='returns')
     terminal = models.ForeignKey(Terminal, on_delete=models.PROTECT)
     # Set for cash refunds, which come out of that shift's drawer.
     shift = models.ForeignKey(Shift, null=True, blank=True, on_delete=models.PROTECT, related_name='returns')
@@ -110,7 +113,10 @@ class SaleReturn(AppendOnlyModel):
 
 class ReturnLine(AppendOnlyModel):
     sale_return = models.ForeignKey(SaleReturn, on_delete=models.PROTECT, related_name='lines')
-    sale_line = models.ForeignKey(SaleLine, on_delete=models.PROTECT, related_name='return_lines')
+    # Null when returning without an invoice (product + unit_price used instead).
+    sale_line = models.ForeignKey(SaleLine, null=True, blank=True, on_delete=models.PROTECT, related_name='return_lines')
+    product = models.ForeignKey(Product, null=True, blank=True, on_delete=models.PROTECT, related_name='+')
+    unit_price = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     quantity = models.DecimalField(max_digits=12, decimal_places=3)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     tax_amount = models.DecimalField(max_digits=14, decimal_places=2)

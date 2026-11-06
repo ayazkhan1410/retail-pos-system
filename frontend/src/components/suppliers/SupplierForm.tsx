@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Input, Select } from '@/components/ui';
 import { PAKISTAN_CITIES } from '@/constants/pakistanCities';
+import { useTranslation } from '@/i18n';
 import type { Supplier } from '@/types';
 import type { SupplierFormData } from '@/store';
 
@@ -25,18 +26,19 @@ interface SupplierFormProps {
 }
 
 export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) {
+  const { t } = useTranslation();
   const [form, setForm] = useState<SupplierFormData>(emptyForm);
 
   const cityOptions = useMemo(() => {
     const citySet = new Set<string>(PAKISTAN_CITIES);
     if (form.city) citySet.add(form.city);
     return [
-      { value: '', label: 'Select city' },
+      { value: '', label: t('suppliers.selectCity') },
       ...[...citySet]
         .sort((a, b) => a.localeCompare(b))
         .map((city) => ({ value: city, label: city })),
     ];
-  }, [form.city]);
+  }, [form.city, t]);
 
   useEffect(() => {
     if (supplier) {
@@ -81,85 +83,85 @@ export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) 
   return (
     <form id="supplier-form" onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
       <Input
-        label="Supplier / Company Name *"
+        label={t('suppliers.companyName')}
         value={form.name}
         onChange={(e) => handleChange('name', e.target.value)}
-        placeholder="e.g. Metro Cash & Carry"
+        placeholder={t('suppliers.companyNamePlaceholder')}
         required
         className="sm:col-span-2"
       />
       <Input
-        label="Phone Number"
+        label={t('suppliers.phone')}
         value={form.phone}
         onChange={(e) => handleChange('phone', e.target.value)}
-        placeholder="+92 300 1234567"
+        placeholder={t('suppliers.phonePlaceholder')}
       />
       <Input
-        label="Email"
+        label={t('suppliers.email')}
         type="email"
         value={form.email}
         onChange={(e) => handleChange('email', e.target.value)}
-        placeholder="orders@supplier.pk"
+        placeholder={t('suppliers.emailPlaceholder')}
       />
       <Select
-        label="City"
+        label={t('suppliers.city')}
         value={form.city}
         onChange={(e) => handleChange('city', e.target.value)}
         options={cityOptions}
       />
       <Input
-        label="NTN / STRN"
+        label={t('suppliers.ntn')}
         value={form.ntn}
         onChange={(e) => handleChange('ntn', e.target.value)}
-        placeholder="1234567-8"
+        placeholder={t('suppliers.ntnPlaceholder')}
       />
       <Input
-        label="Address"
+        label={t('suppliers.address')}
         value={form.address}
         onChange={(e) => handleChange('address', e.target.value)}
-        placeholder="Street, area, landmark"
+        placeholder={t('suppliers.addressPlaceholder')}
         className="sm:col-span-2"
       />
       <Input
-        label="Bank Account (IBAN)"
+        label={t('suppliers.bankAccount')}
         value={form.bankAccount}
         onChange={(e) => handleChange('bankAccount', e.target.value)}
-        placeholder="PK00 XXXX 0000 0000 0000 0000"
+        placeholder={t('suppliers.bankAccountPlaceholder')}
         className="sm:col-span-2"
       />
       <Select
-        label="Payment Type"
+        label={t('suppliers.paymentType')}
         value={form.paymentType}
         onChange={(e) => handleChange('paymentType', e.target.value)}
         options={[
-          { value: 'credit', label: 'Credit' },
-          { value: 'cash', label: 'Cash' },
+          { value: 'credit', label: t('suppliers.paymentCredit') },
+          { value: 'cash', label: t('suppliers.paymentCash') },
         ]}
       />
       <Input
-        label="Current Balance (PKR)"
+        label={t('suppliers.currentBalance')}
         type="number"
         value={form.currentBalance}
         disabled={!!supplier}
         onChange={(e) => handleChange('currentBalance', e.target.value)}
       />
       <Select
-        label="Status"
+        label={t('suppliers.status')}
         value={form.status}
         onChange={(e) => handleChange('status', e.target.value)}
         options={[
-          { value: 'active', label: 'Active' },
-          { value: 'inactive', label: 'Inactive' },
+          { value: 'active', label: t('suppliers.statusActive') },
+          { value: 'inactive', label: t('suppliers.statusInactive') },
         ]}
       />
       <div className="sm:col-span-2">
         <label className="mb-2 block text-sm font-medium text-brand-700 dark:text-brand-300">
-          Notes
+          {t('suppliers.notes')}
         </label>
         <textarea
           value={form.notes}
           onChange={(e) => handleChange('notes', e.target.value)}
-          placeholder="Delivery schedule, payment terms, etc."
+          placeholder={t('suppliers.notesPlaceholder')}
           rows={3}
           className="w-full rounded-xl border border-brand-200/80 bg-white/80 px-3.5 py-2.5 text-sm shadow-soft focus-ring dark:border-brand-700/80 dark:bg-brand-900/80"
         />

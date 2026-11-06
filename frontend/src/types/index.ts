@@ -8,12 +8,16 @@ export interface Product {
   sku: string;
   aluCode?: string;
   price: number;
+  /** Shelf price after the item's own running discount. */
+  salePrice: number;
   cost: number;
   stock: number;
   category: string;
   subCategory?: string;
   brand?: string;
   make?: string;
+  attributes?: string;
+  season?: string;
   supplierId?: string;
   supplierName?: string;
   department?: string;
@@ -27,10 +31,12 @@ export interface Product {
   weight?: number;
   leadTime?: number;
   costingMethod?: 'recent_cost' | 'manual_cost';
-  saleRate?: string;
   salesTaxPercent?: number;
+  pctCode?: string;
   discPercent?: number;
   discAmount?: number;
+  discStart?: string;
+  discEnd?: string;
   threshHold?: number;
   minLevel?: number;
   maxLevel?: number;
@@ -48,19 +54,6 @@ export interface Product {
 export interface CartItem {
   product: Product;
   quantity: number;
-  discount: number;
-}
-
-export interface Invoice {
-  id: string;
-  invoiceNo: string;
-  counterId: string;
-  counterName: string;
-  items: number;
-  total: number;
-  paymentMethod: string;
-  createdAt: string;
-  status: 'completed' | 'refunded' | 'void';
 }
 
 export interface GRNLine {
@@ -129,6 +122,7 @@ export interface Purchase {
 export interface Supplier {
   id: string;
   name: string;
+  contactPerson?: string;
   phone: string;
   email: string;
   address: string;
@@ -151,15 +145,101 @@ export interface KPIData {
   icon?: 'sales' | 'receipt' | 'alert' | 'counter';
 }
 
-export interface Counter {
-  id: string;
+export type UserRole = 'owner' | 'manager' | 'cashier' | 'stock_keeper' | 'accountant';
+
+export interface User {
+  id: number;
+  email: string;
+  full_name: string;
+  phone: string;
+  employee_code: string | null;
+  role: UserRole;
+  is_active: boolean;
+  permissions: string[];
+}
+
+export interface Branch {
+  id: number;
+  code: string;
   name: string;
-  active: boolean;
+  address: string;
+  phone: string;
+  ntn: string;
+}
+
+export interface Terminal {
+  id: number;
+  code: string;
+  name: string;
+}
+
+export interface Shift {
+  id: number;
+  terminal: number;
+  terminal_name: string;
+  opened_by_name: string;
+  opened_at: string;
+  closed_at: string | null;
+  opening_cash: string;
+  expected_cash: string | null;
+  counted_cash: string | null;
+  sales_total: string;
+  sales_count: number;
+}
+
+export type PaymentMethod = 'cash' | 'jazzcash' | 'easypaisa' | 'card';
+
+export interface SaleLine {
+  name: string;
+  barcode: string;
+  quantity: string;
+  unit_price: string;
+  discount: string;
+  tax_rate: string;
+  tax_amount: string;
+  line_total: string;
+}
+
+export interface Sale {
+  id: number;
+  invoice_no: string;
+  terminal: number;
+  terminal_name: string;
+  cashier_name: string;
+  subtotal: string;
+  discount: string;
+  tax: string;
+  total: string;
+  change_due: string;
+  created_at: string;
+  lines: SaleLine[];
+  payments: { method: PaymentMethod; amount: string; reference: string }[];
+}
+
+export interface DashboardData {
+  today_revenue: string;
+  today_count: number;
+  yesterday_revenue: string;
+  open_counters: number;
+  total_counters: number;
+  stock: { out: number; low: number; ok: number };
+  counters: string[];
+  sales_by_day: ({ day: string } & Record<string, string | number>)[];
+  top_products: { name: string; units: string; revenue: string }[];
+  payment_methods: { method: PaymentMethod; amount: string }[];
+  peak_hours: { hour: number; count: number }[];
+  recent_activity: { id: number; action: string; target: string; user: string; created_at: string }[];
+  recent_shifts: (Shift & { difference: string })[];
 }
 
 export type Theme = 'light' | 'dark';
 
-export const PRODUCT_CATEGORIES_LIST = [
-  'BATH ITEMS', 'BEVERAGE', 'BIRTHDAY', 'CAT FOOD', 'COSMETICS', 'CROCKERY',
-  'DAIRY', 'GROCERY', 'BAKERY', 'SNACKS', 'CLEANING', 'STATIONERY',
-] as const;
+export interface SupplierApiOption {
+  id: number;
+  name: string;
+}
+
+export interface RoleMatrix {
+  permissions: string[];
+  roles: Record<string, string[]>;
+}

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Plus, Search, Pencil, Trash2, Package, AlertTriangle, Filter, X, Printer } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
 import { Card, Button, Input, Badge, StockBadge, Modal, Select } from '@/components/ui';
@@ -16,7 +16,8 @@ import {
 } from '@/utils/inventoryUtils';
 import ProductForm, { type ProductFormSubmitResult } from '@/components/inventory/ProductForm';
 import LabelPrintModal from '@/components/inventory/LabelPrintModal';
-import { useInventoryStore } from '@/store';
+import { apiErrorMessage } from '@/services';
+import { useCan, useInventoryStore } from '@/store';
 import { useTranslation } from '@/i18n';
 import type { Product } from '@/types';
 
@@ -39,7 +40,14 @@ function ExpiryCell({ expiryDate }: { expiryDate?: string }) {
 
 export default function InventoryPage() {
   const { t } = useTranslation();
-  const { products, addProduct, updateProduct, deleteProduct } = useInventoryStore();
+  const can = useCan();
+  const { products, loading, error: loadFailed, fetchProducts, addProduct, updateProduct, deleteProduct } = useInventoryStore();
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    void fetchProducts();
+  }, [fetchProducts]);
   const [filters, setFilters] = useState<InventoryFilters>(emptyInventoryFilters);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -83,20 +91,36 @@ export default function InventoryPage() {
     }));
   };
 
-  const handleSubmit = (data: ProductFormSubmitResult) => {
+  const handleSubmit = async (data: ProductFormSubmitResult) => {
     const { shouldPrintLabel, ...productData } = data;
-    if (editingProduct) {
-      updateProduct(editingProduct.id, productData);
-      setModalOpen(false);
-      setEditingProduct(null);
-    } else {
-      const newProduct = addProduct(productData);
-      setModalOpen(false);
-      setEditingProduct(null);
-      if (shouldPrintLabel) {
-        setLabelProduct(newProduct);
-        setLabelModalOpen(true);
+    setSaving(true);
+    setError('');
+    try {
+      if (editingProduct) {
+        await updateProduct(editingProduct.id, productData);
+      } else {
+        const newProduct = await addProduct(productData);
+        if (shouldPrintLabel) {
+          setLabelProduct(newProduct);
+          setLabelModalOpen(true);
+        }
       }
+      setModalOpen(false);
+      setEditingProduct(null);
+    } catch (err) {
+      setError(apiErrorMessage(err, t('inventory.saveError')));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (product: Product) => {
+    if (!window.confirm(t('inventory.confirmDelete', { name: product.name }))) return;
+    setError('');
+    try {
+      await deleteProduct(product.id);
+    } catch (err) {
+      setError(apiErrorMessage(err, t('inventory.deleteError')));
     }
   };
 
@@ -119,13 +143,18 @@ export default function InventoryPage() {
         title={t('inventory.title')}
         subtitle={t('inventory.subtitle', { total: stats.total, low: stats.low_stock, out: stats.out_of_stock })}
         actions={
-          <Button variant="accent" size="sm" onClick={() => { setEditingProduct(null); setModalOpen(true); }}>
+          <Button variant="accent" size="sm" onClick={() => { setError(''); setEditingProduct(null); setModalOpen(true); }}>
             <Plus className="h-4 w-4" /> {t('inventory.addProduct')}
           </Button>
         }
       />
 
       <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6">
+        {(loadFailed || (error && !modalOpen)) && (
+          <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+            {error || t('inventory.loadError')}
+          </p>
+        )}
         <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {statCards.map((s) => (
             <button key={s.key} type="button" onClick={s.onClick} className="text-left">
@@ -235,7 +264,7 @@ export default function InventoryPage() {
                   <th className="px-4 py-3 sm:px-6">{t('inventory.itemCode')}</th>
                   <th className="px-4 py-3 sm:px-6">{t('inventory.itemDescription')}</th>
                   <th className="px-4 py-3 text-right sm:px-6">{t('inventory.qtyOnHand')}</th>
-                  <th className="px-4 py-3 text-right sm:px-6">{t('inventory.cost')}</th>
+                  {can('products.view_cost') && <th className="px-4 py-3 text-right sm:px-6">{t('inventory.cost')}</th>}
                   <th className="px-4 py-3 text-right sm:px-6">{t('inventory.rate')}</th>
                   <th className="px-4 py-3 sm:px-6">{t('inventory.category')}</th>
                   <th className="px-4 py-3 sm:px-6">{t('inventory.expiryDate')}</th>
@@ -254,7 +283,7 @@ export default function InventoryPage() {
                       <td className="px-4 py-3 font-mono text-xs font-medium sm:px-6">{getItemCode(product)}</td>
                       <td className="px-4 py-3 font-medium sm:px-6">{product.name}</td>
                       <td className="px-4 py-3 text-right font-semibold sm:px-6">{product.stock}</td>
-                      <td className="px-4 py-3 text-right text-brand-500 sm:px-6">{formatCurrency(product.cost)}</td>
+                      {can('products.view_cost') && <td className="px-4 py-3 text-right text-brand-500 sm:px-6">{formatCurrency(product.cost)}</td>}
                       <td className="px-4 py-3 text-right font-semibold sm:px-6">{formatCurrency(product.price)}</td>
                       <td className="px-4 py-3 sm:px-6"><Badge>{product.category}</Badge></td>
                       <td className="px-4 py-3 sm:px-6"><ExpiryCell expiryDate={product.expiryDate} /></td>
@@ -264,10 +293,10 @@ export default function InventoryPage() {
                           <Button variant="ghost" size="sm" onClick={() => openLabelPrint(product)} title={t('inventory.printLabel')}>
                             <Printer className="h-3.5 w-3.5" />
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => { setEditingProduct(product); setModalOpen(true); }}>
+                          <Button variant="ghost" size="sm" onClick={() => { setError(''); setEditingProduct(product); setModalOpen(true); }}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                          <Button variant="ghost" size="sm" onClick={() => deleteProduct(product.id)} className="text-red-500 hover:text-red-600">
+                          <Button variant="ghost" size="sm" onClick={() => void handleDelete(product)} className="text-red-500 hover:text-red-600">
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -278,7 +307,8 @@ export default function InventoryPage() {
               </tbody>
             </table>
 
-            {filtered.length === 0 && (
+            {loading && <p className="py-16 text-center text-sm text-brand-500">{t('common.loading')}</p>}
+            {!loading && filtered.length === 0 && (
               <div className="flex flex-col items-center py-16 text-center">
                 <AlertTriangle className="mb-3 h-10 w-10 text-brand-300" />
                 <p className="font-medium">{t('inventory.noResults')}</p>
@@ -301,13 +331,14 @@ export default function InventoryPage() {
         footer={
           <>
             <Button variant="outline" onClick={() => setModalOpen(false)}>{t('common.cancel')}</Button>
-            <Button variant="accent" type="submit" form="product-form">
+            <Button variant="accent" type="submit" form="product-form" loading={saving}>
               {editingProduct ? t('inventory.saveChanges') : t('inventory.addProduct')}
             </Button>
           </>
         }
       >
-        <ProductForm product={editingProduct} onSubmit={handleSubmit} />
+        {error && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p>}
+        <ProductForm product={editingProduct} onSubmit={(data) => void handleSubmit(data)} />
       </Modal>
 
       <LabelPrintModal

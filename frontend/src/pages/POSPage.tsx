@@ -11,19 +11,40 @@ import {
   ArrowLeft,
   Search,
   X,
+  LogOut,
+  Lock,
+  Printer,
 } from 'lucide-react';
-import { usePOSStore, useInventoryStore } from '@/store';
+import { homePath, usePOSStore, useInventoryStore, useAuthStore, useCan } from '@/store';
 import { useKeyboardShortcut } from '@/hooks';
-import { Button } from '@/components/ui';
-import { PRODUCT_CATEGORIES } from '@/utils/mockData';
-import { formatCurrency, cn } from '@/utils';
+import { Button, Modal } from '@/components/ui';
+import { formatCurrency, cn, newUuid } from '@/utils';
+import { getExpiryStatus } from '@/utils/inventoryUtils';
+import { printReceipt } from '@/utils/receiptPrint';
+import { apiErrorMessage } from '@/services';
+import { auditApi, salesApi } from '@/services/endpoints';
+import PaymentModal, { type PaymentResult } from '@/components/pos/PaymentModal';
+import { CloseShiftModal, OpenShiftModal, ShiftSummaryModal } from '@/components/pos/ShiftModals';
+import type { PaymentMethod, Product, Sale, Shift, Terminal } from '@/types';
 import { useTranslation } from '@/i18n';
 import LanguageToggle from '@/components/layout/LanguageToggle';
 
-const COUNTERS = [
-  { id: '1', name: 'C1', active: true },
-  { id: '2', name: 'C2', active: true },
-];
+const CATALOG_REFRESH_MS = 60_000;
+const isExpired = (product: Product) => getExpiryStatus(product.expiryDate) === 'expired';
+
+function beep() {
+  try {
+    const audio = new AudioContext();
+    const tone = audio.createOscillator();
+    tone.frequency.value = 220;
+    tone.connect(audio.destination);
+    tone.start();
+    tone.stop(audio.currentTime + 0.2);
+    tone.onended = () => void audio.close();
+  } catch {
+    // Sound is a bonus; the on-screen message still shows.
+  }
+}
 
 function LiveClock() {
   const [time, setTime] = useState(new Date());
@@ -50,20 +71,75 @@ export default function POSPage() {
     updateQuantity,
     removeFromCart,
     clearCart,
+    syncCart,
     cartTotal,
     cartItemCount,
   } = usePOSStore();
-  const { products } = useInventoryStore();
+  const { products, error: catalogFailed, fetchProducts, applySale } = useInventoryStore();
+  const { user, logout } = useAuthStore();
+  const can = useCan();
 
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [shift, setShift] = useState<Shift | null>(null);
+  const [shiftLoaded, setShiftLoaded] = useState(false);
+  const [closingShift, setClosingShift] = useState(false);
+  const [closedShift, setClosedShift] = useState<Shift | null>(null);
+  const [payMethod, setPayMethod] = useState<PaymentMethod | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [payError, setPayError] = useState('');
+  const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const [category, setCategory] = useState('All');
   const [productSearch, setProductSearch] = useState('');
   const [scanFlash, setScanFlash] = useState(false);
+  const [notice, setNotice] = useState<{ text: string; kind: 'warning' | 'error' } | null>(null);
   const scannerRef = useRef<HTMLInputElement>(null);
+  // Kept until the bill changes, so a retry after a lost reply can't charge the customer twice.
+  const saleUuid = useRef(newUuid());
+
+  const modalOpen = !!payMethod || !!completedSale || closingShift || !!closedShift || (shiftLoaded && !shift);
 
   const focusScanner = useCallback(() => {
     window.requestAnimationFrame(() => scannerRef.current?.focus());
   }, []);
+
+  useEffect(() => {
+    saleUuid.current = newUuid();
+  }, [cart]);
+
+  useEffect(() => {
+    salesApi.terminals().then(({ data }) => {
+      setTerminals(data);
+      const saved = usePOSStore.getState().activeCounter;
+      const current = data.find((terminal) => terminal.id === saved?.id) ?? data[0];
+      if (current) setActiveCounter(current);
+    }).catch(() => setNotice({ text: t('pos.catalogError'), kind: 'error' }));
+    // Runs once on opening the till.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const load = () => fetchProducts().then(() => {
+      if (!useInventoryStore.getState().error) syncCart(useInventoryStore.getState().products);
+    });
+    void load();
+    const timer = window.setInterval(() => void load(), CATALOG_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [fetchProducts, syncCart]);
+
+  const refreshShift = useCallback(async (terminalId: number) => {
+    const { data } = await salesApi.currentShift(terminalId);
+    setShift(data.shift);
+    setShiftLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (activeCounter) void refreshShift(activeCounter.id).catch(() => setNotice({ text: t('pos.catalogError'), kind: 'error' }));
+  }, [activeCounter, refreshShift, t]);
+
+  const categories = useMemo(
+    () => ['All', ...Array.from(new Set(products.map((p) => p.category))).sort()],
+    [products],
+  );
 
   const filteredProducts = useMemo(() => {
     const q = productSearch.toLowerCase();
@@ -72,10 +148,8 @@ export default function POSPage() {
       const matchSearch =
         !q ||
         p.name.toLowerCase().includes(q) ||
-        p.barcode.includes(productSearch) ||
-        p.sku.toLowerCase().includes(q) ||
-        (p.aluCode?.toLowerCase().includes(q) ?? false);
-      return matchCat && matchSearch && p.stock > 0;
+        p.barcode.toLowerCase().includes(q);
+      return matchCat && matchSearch && !isExpired(p);
     });
   }, [category, productSearch, products]);
 
@@ -85,61 +159,52 @@ export default function POSPage() {
   };
 
   const addProduct = useCallback(
-    (productId: string) => {
-      const product = products.find((p) => p.id === productId);
-      if (product && product.stock > 0) {
-        addToCart({ product, quantity: 1, discount: 0 });
-        flashScanOk();
-        setScannerInput('');
-        setProductSearch('');
+    (product: Product) => {
+      setScannerInput('');
+      setProductSearch('');
+      if (isExpired(product)) {
+        setNotice({ text: t('pos.expiredItem', { name: product.name }), kind: 'error' });
+        beep();
         focusScanner();
+        return;
       }
+      addToCart(product);
+      flashScanOk();
+      setNotice(
+        product.stock <= 0
+          ? { text: t('pos.outOfStockWarning', { name: product.name }), kind: 'warning' }
+          : null,
+      );
+      focusScanner();
     },
-    [addToCart, focusScanner, products, setScannerInput],
+    [addToCart, focusScanner, setScannerInput, t],
   );
 
   const resolveAndAdd = useCallback(
     (query: string) => {
       const q = query.trim();
-      if (!q) return false;
+      if (!q) return;
 
-      const exact =
-        products.find((p) => p.barcode === q && p.stock > 0) ||
-        products.find((p) => p.sku === q && p.stock > 0) ||
-        products.find((p) => p.aluCode === q && p.stock > 0);
-
+      const exact = products.find((p) => p.barcode.toLowerCase() === q.toLowerCase());
       if (exact) {
-        addToCart({ product: exact, quantity: 1, discount: 0 });
-        flashScanOk();
-        setScannerInput('');
-        setProductSearch('');
-        focusScanner();
-        return true;
+        addProduct(exact);
+        return;
       }
 
-      const qLower = q.toLowerCase();
-      const matches = products.filter(
-        (p) =>
-          p.stock > 0 &&
-          (p.name.toLowerCase().includes(qLower) ||
-            p.barcode.includes(q) ||
-            p.sku.toLowerCase().includes(qLower)),
-      );
-
-      if (matches.length === 1) {
-        addToCart({ product: matches[0], quantity: 1, discount: 0 });
-        flashScanOk();
-        setScannerInput('');
-        setProductSearch('');
-        focusScanner();
-        return true;
+      // By name only: a half-read barcode must never add the wrong item by itself.
+      const byName = products.filter((p) => p.name.toLowerCase().includes(q.toLowerCase()));
+      if (byName.length === 1) {
+        addProduct(byName[0]);
+        return;
       }
-
+      if (byName.length === 0) {
+        setNotice({ text: t('pos.notFound', { code: q }), kind: 'error' });
+        beep();
+      }
       setProductSearch(q);
       setScannerInput('');
-      return false;
     },
-    [addToCart, focusScanner, products, setScannerInput],
+    [addProduct, products, setScannerInput, t],
   );
 
   const handleScannerSubmit = (e: React.FormEvent) => {
@@ -147,27 +212,99 @@ export default function POSPage() {
     resolveAndAdd(scannerInput);
   };
 
-  const handleCheckout = useCallback(
-    async (method: string) => {
-      if (cart.length === 0) return;
-      setCheckoutLoading(true);
-      await new Promise((r) => setTimeout(r, 200));
-      clearCart();
-      setCheckoutLoading(false);
-      focusScanner();
-      void method;
+  const startPayment = useCallback(
+    (method: PaymentMethod) => {
+      if (cart.length === 0 || modalOpen) return;
+      setPayError('');
+      setPayMethod(method);
     },
-    [cart.length, clearCart, focusScanner],
+    [cart.length, modalOpen],
   );
 
-  useEffect(() => {
+  const completeSale = async (result: PaymentResult) => {
+    if (!activeCounter || submitting) return;
+    setSubmitting(true);
+    setPayError('');
+    try {
+      const { data } = await salesApi.create({
+        client_uuid: saleUuid.current,
+        terminal: activeCounter.id,
+        discount: result.discount.toFixed(2),
+        lines: cart.map((item) => ({ product: Number(item.product.id), quantity: String(item.quantity) })),
+        payments: result.payments,
+      });
+      applySale(cart.map((item) => ({ productId: item.product.id, quantity: item.quantity })));
+      clearCart();
+      setPayMethod(null);
+      setCompletedSale(data);
+      setNotice(null);
+      void refreshShift(activeCounter.id).catch(() => undefined);
+    } catch (err) {
+      setPayError(apiErrorMessage(err, t('pos.saleFailed')));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const finishSale = useCallback(() => {
+    setCompletedSale(null);
     focusScanner();
   }, [focusScanner]);
 
+  const handleClearCart = useCallback(() => {
+    if (cart.length === 0 || !window.confirm(t('pos.confirmClear'))) return;
+    void auditApi.cartCleared(cartItemCount(), cartTotal()).catch(() => undefined);
+    clearCart();
+    setNotice(null);
+    focusScanner();
+  }, [cart.length, cartItemCount, cartTotal, clearCart, focusScanner, t]);
+
+  const chooseCounter = (counter: Terminal) => {
+    if (counter.id === activeCounter?.id) return;
+    if (cart.length > 0) {
+      setNotice({ text: t('pos.switchBlocked'), kind: 'warning' });
+      return;
+    }
+    setShiftLoaded(false);
+    setActiveCounter(counter);
+  };
+
+  const openShift = async (amount: string) => {
+    if (!activeCounter) return;
+    const { data } = await salesApi.openShift(activeCounter.id, amount);
+    setShift(data);
+    focusScanner();
+  };
+
+  const closeShift = async (amount: string) => {
+    if (!shift) return;
+    const { data } = await salesApi.closeShift(shift.id, amount);
+    setClosingShift(false);
+    setClosedShift(data);
+    setShift(null);
+  };
+
+  useEffect(() => {
+    if (!modalOpen) focusScanner();
+  }, [focusScanner, modalOpen]);
+
+  // Works wherever focus is, including after printing. Not a useKeyboardShortcut: it must not swallow Enter elsewhere.
+  useEffect(() => {
+    if (!completedSale) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Enter' && !event.repeat) {
+        event.preventDefault();
+        finishSale();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [completedSale, finishSale]);
+
   useKeyboardShortcut('f2', focusScanner);
-  useKeyboardShortcut('f4', () => clearCart(), { ctrl: true });
-  useKeyboardShortcut('f1', () => void handleCheckout('cash'));
-  useKeyboardShortcut('f9', () => void handleCheckout('card'), { ctrl: true });
+  useKeyboardShortcut('f4', handleClearCart, { ctrl: true });
+  useKeyboardShortcut('f1', () => startPayment('cash'));
+  useKeyboardShortcut('f9', () => startPayment('card'), { ctrl: true });
 
   const subtotal = cartTotal();
   const itemCount = cartItemCount();
@@ -177,29 +314,30 @@ export default function POSPage() {
       {/* Slim header */}
       <header className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-white/10 bg-black/30 px-2 sm:px-3">
         <div className="flex min-w-0 items-center gap-2">
-          <Link to="/dashboard">
-            <button
-              type="button"
+          {homePath(user) !== '/pos' && (
+            <Link
+              to={homePath(user)}
+              aria-label={t('pos.backToDashboard')}
               className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white/70 hover:bg-white/20"
             >
-              <ArrowLeft className="h-4 w-4" />
-            </button>
-          </Link>
+              <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
+            </Link>
+          )}
           <span className="hidden text-sm font-bold sm:inline">{t('pos.title')}</span>
           <div className="flex gap-0.5 rounded-lg bg-white/5 p-0.5">
-            {COUNTERS.map((counter) => (
+            {terminals.map((counter) => (
               <button
                 key={counter.id}
                 type="button"
-                onClick={() => setActiveCounter(counter)}
+                onClick={() => chooseCounter(counter)}
                 className={cn(
                   'rounded-md px-2 py-1 text-xs font-bold transition-all',
-                  activeCounter.id === counter.id
+                  activeCounter?.id === counter.id
                     ? 'bg-white text-brand-900'
                     : 'text-brand-400 hover:text-white',
                 )}
               >
-                {counter.name}
+                {counter.code}
               </button>
             ))}
           </div>
@@ -207,9 +345,31 @@ export default function POSPage() {
         <div className="flex items-center gap-2 sm:gap-3">
           <LiveClock />
           <LanguageToggle compact />
-          <span className="hidden text-xs text-brand-400 md:inline">
-            {t('pos.todaySales')} <strong className="text-white">Rs. 1,48,250</strong>
-          </span>
+          {shift && (
+            <>
+              <span className="hidden text-xs text-brand-400 md:inline">
+                {t('pos.shiftSales')} <strong className="text-white">{formatCurrency(Number(shift.sales_total))}</strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => setClosingShift(true)}
+                disabled={cart.length > 0}
+                className="flex h-8 items-center gap-1 rounded-lg bg-white/10 px-2 text-xs font-medium text-white/80 hover:bg-white/20 disabled:opacity-40"
+              >
+                <Lock className="h-3.5 w-3.5" /> <span className="hidden sm:inline">{t('pos.closeShift')}</span>
+              </button>
+            </>
+          )}
+          <span className="hidden max-w-[120px] truncate text-xs text-brand-400 lg:inline">{user?.full_name}</span>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            aria-label={t('common.logout')}
+            title={t('common.logout')}
+            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-white/70 hover:bg-white/20"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
       </header>
 
@@ -230,6 +390,7 @@ export default function POSPage() {
               setProductSearch(e.target.value);
             }}
             placeholder={t('pos.scanPlaceholder')}
+            aria-label={t('pos.scanPlaceholder')}
             className="h-11 flex-1 bg-transparent px-2 text-base font-medium text-white placeholder:text-brand-500 focus:outline-none"
             autoComplete="off"
             autoFocus
@@ -252,9 +413,20 @@ export default function POSPage() {
             className="mr-1 flex h-9 items-center gap-1 rounded-lg bg-accent px-3 text-xs font-bold text-white hover:bg-accent-light"
           >
             <Search className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Add</span>
+            <span className="hidden sm:inline">{t('pos.addButton')}</span>
           </button>
         </div>
+        {(notice || catalogFailed) && (
+          <p
+            role="alert"
+            className={cn(
+              'mt-1 rounded-md px-2 py-1 text-xs font-medium',
+              notice?.kind === 'warning' ? 'bg-amber-500/20 text-amber-200' : 'bg-red-500/20 text-red-200',
+            )}
+          >
+            {notice?.text ?? t('pos.catalogError')}
+          </p>
+        )}
         <p className="mt-1 hidden text-[10px] text-brand-500 sm:block">
           <kbd className="rounded bg-white/10 px-1 font-mono">F2</kbd> scan ·{' '}
           <kbd className="rounded bg-white/10 px-1 font-mono">F1</kbd> cash ·{' '}
@@ -269,16 +441,13 @@ export default function POSPage() {
             <div className="min-w-0">
               <h2 className="text-sm font-bold">{t('pos.currentBill')}</h2>
               <p className="text-[11px] text-brand-500">
-                {activeCounter.name} · {itemCount} {t('common.items')}
+                {activeCounter?.name} · {itemCount} {t('common.items')}
               </p>
             </div>
             {cart.length > 0 && (
               <button
                 type="button"
-                onClick={() => {
-                  clearCart();
-                  focusScanner();
-                }}
+                onClick={handleClearCart}
                 className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-red-400 hover:bg-red-500/10"
               >
                 <Trash2 className="h-3 w-3" /> {t('pos.clearAll')}
@@ -299,9 +468,9 @@ export default function POSPage() {
                 <thead className="sticky top-0 z-10 bg-black/60 text-[10px] uppercase tracking-wide text-brand-500 backdrop-blur-sm">
                   <tr>
                     <th className="px-2 py-1.5 font-medium">#</th>
-                    <th className="px-2 py-1.5 font-medium">Item</th>
-                    <th className="px-2 py-1.5 text-center font-medium">Qty</th>
-                    <th className="px-2 py-1.5 text-right font-medium">Amt</th>
+                    <th className="px-2 py-1.5 font-medium">{t('pos.item')}</th>
+                    <th className="px-2 py-1.5 text-center font-medium">{t('pos.qty')}</th>
+                    <th className="px-2 py-1.5 text-right font-medium">{t('pos.amount')}</th>
                     <th className="w-8" />
                   </tr>
                 </thead>
@@ -314,7 +483,12 @@ export default function POSPage() {
                           {item.product.name}
                         </p>
                         <p className="text-[10px] text-brand-500">
-                          {formatCurrency(item.product.price)}
+                          {formatCurrency(item.product.salePrice)}
+                          {item.quantity > item.product.stock && (
+                            <span className="ml-1.5 text-amber-300">
+                              {t('pos.moreThanStock', { stock: item.product.stock })}
+                            </span>
+                          )}
                         </p>
                       </td>
                       <td className="px-1 py-1.5">
@@ -326,9 +500,21 @@ export default function POSPage() {
                           >
                             <Minus className="h-3 w-3" />
                           </button>
-                          <span className="min-w-[1.5rem] text-center text-xs font-bold">
-                            {item.quantity}
-                          </span>
+                          {item.product.qtyDecimal ? (
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.001"
+                              aria-label={t('pos.qty')}
+                              value={item.quantity}
+                              onChange={(e) => updateQuantity(item.product.id, Number(e.target.value))}
+                              className="w-14 bg-transparent text-center text-xs font-bold focus:outline-none"
+                            />
+                          ) : (
+                            <span className="min-w-[1.5rem] text-center text-xs font-bold">
+                              {item.quantity}
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => updateQuantity(item.product.id, item.quantity + 1)}
@@ -339,7 +525,7 @@ export default function POSPage() {
                         </div>
                       </td>
                       <td className="px-2 py-1.5 text-right text-xs font-bold sm:text-sm">
-                        {formatCurrency(item.product.price * item.quantity)}
+                        {formatCurrency(Math.round(item.product.salePrice * item.quantity * 100) / 100)}
                       </td>
                       <td className="px-1 py-1.5">
                         <button
@@ -361,9 +547,9 @@ export default function POSPage() {
           <div className="shrink-0 border-t border-white/10 bg-black/40 p-2 sm:p-3">
             <div className="mb-2 flex items-baseline justify-between gap-2">
               <div className="text-[11px] text-brand-400">
-                <span>{itemCount} items</span>
+                <span>{itemCount} {t('common.items')}</span>
                 <span className="mx-1.5">·</span>
-                <span>{t('pos.discount')} Rs. 0</span>
+                <span>{t('pos.taxIncluded')}</span>
               </div>
               <div className="text-right">
                 <p className="text-[10px] uppercase text-brand-500">{t('pos.total')}</p>
@@ -376,9 +562,8 @@ export default function POSPage() {
               variant="accent"
               size="lg"
               className="mb-2 h-12 w-full text-base font-bold"
-              loading={checkoutLoading}
               disabled={cart.length === 0}
-              onClick={() => void handleCheckout('cash')}
+              onClick={() => startPayment('cash')}
             >
               <Banknote className="h-5 w-5" /> {t('pos.cash')} <span className="text-white/70">(F1)</span>
             </Button>
@@ -388,7 +573,7 @@ export default function POSPage() {
                 size="sm"
                 className="h-9 border border-white/10 bg-white/10 text-xs text-white hover:bg-white/20"
                 disabled={cart.length === 0}
-                onClick={() => void handleCheckout('jazzcash')}
+                onClick={() => startPayment('jazzcash')}
               >
                 <Smartphone className="h-3.5 w-3.5" /> {t('pos.jazzcash')}
               </Button>
@@ -397,7 +582,7 @@ export default function POSPage() {
                 size="sm"
                 className="h-9 border border-white/10 bg-white/10 text-xs text-white hover:bg-white/20"
                 disabled={cart.length === 0}
-                onClick={() => void handleCheckout('easypaisa')}
+                onClick={() => startPayment('easypaisa')}
               >
                 <Smartphone className="h-3.5 w-3.5" /> {t('pos.easypaisa')}
               </Button>
@@ -406,7 +591,7 @@ export default function POSPage() {
                 size="sm"
                 className="h-9 border border-white/10 bg-white/10 text-xs text-white hover:bg-white/20"
                 disabled={cart.length === 0}
-                onClick={() => void handleCheckout('card')}
+                onClick={() => startPayment('card')}
               >
                 <CreditCard className="h-3.5 w-3.5" /> {t('pos.cardPay')}
               </Button>
@@ -417,7 +602,7 @@ export default function POSPage() {
         {/* Products — compact backup when scan fails */}
         <div className="flex min-h-0 w-full flex-col lg:order-1 lg:w-[48%]">
           <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-white/10 px-2 py-1.5">
-            {PRODUCT_CATEGORIES.map((cat) => (
+            {categories.map((cat) => (
               <button
                 key={cat}
                 type="button"
@@ -429,7 +614,7 @@ export default function POSPage() {
                     : 'bg-white/5 text-brand-400 hover:bg-white/10',
                 )}
               >
-                {cat}
+                {cat === 'All' ? t('common.all') : cat}
               </button>
             ))}
           </div>
@@ -440,7 +625,7 @@ export default function POSPage() {
                 <button
                   key={product.id}
                   type="button"
-                  onClick={() => addProduct(product.id)}
+                  onClick={() => addProduct(product)}
                   className="rounded-lg border border-white/10 bg-white/5 px-2 py-2 text-left transition-colors hover:border-accent/40 hover:bg-white/10 active:scale-[0.98]"
                 >
                   <p className="line-clamp-2 text-[11px] font-semibold leading-tight sm:text-xs">
@@ -448,18 +633,76 @@ export default function POSPage() {
                   </p>
                   <div className="mt-1 flex items-center justify-between gap-1">
                     <span className="text-xs font-bold text-accent-glow">
-                      {formatCurrency(product.price)}
+                      {formatCurrency(product.salePrice)}
                     </span>
-                    <span className="text-[9px] text-brand-500">{product.stock}</span>
+                    <span className={cn('text-[9px]', product.stock <= 0 ? 'font-bold text-red-400' : 'text-brand-500')}>{product.stock}</span>
                   </div>
                 </button>
               ))}
             </div>
             {filteredProducts.length === 0 && (
-              <p className="py-8 text-center text-xs text-brand-500">No products found</p>
+              <p className="py-8 text-center text-xs text-brand-500">{t('pos.noProducts')}</p>
             )}
           </div>
         </div>
+      </div>
+
+      <div className="text-brand-900 dark:text-brand-50">
+        <PaymentModal
+          open={!!payMethod}
+          total={subtotal}
+          initialMethod={payMethod ?? 'cash'}
+          canDiscount={can('pos.discount')}
+          submitting={submitting}
+          error={payError}
+          onClose={() => {
+            setPayMethod(null);
+            focusScanner();
+          }}
+          onConfirm={(result) => void completeSale(result)}
+        />
+
+        <Modal
+          open={!!completedSale}
+          onClose={finishSale}
+          title={t('pos.saleComplete')}
+          size="sm"
+          footer={
+            <>
+              <Button variant="outline" onClick={() => completedSale && void printReceipt(completedSale)}>
+                <Printer className="h-4 w-4" /> {t('pos.printReceipt')}
+              </Button>
+              <Button variant="accent" autoFocus onClick={finishSale}>{t('pos.newSale')}</Button>
+            </>
+          }
+        >
+          {completedSale && (
+            <div className="space-y-2 text-sm">
+              <p dir="ltr" className="text-right font-mono text-xs text-brand-500 rtl:text-left" data-testid="invoice-no">{completedSale.invoice_no}</p>
+              <div className="flex justify-between">
+                <span className="text-brand-500">{t('pos.billTotal')}</span>
+                <span className="font-bold">{formatCurrency(Number(completedSale.total))}</span>
+              </div>
+              <div className="flex items-baseline justify-between text-emerald-600">
+                <span>{t('pos.changeDue')}</span>
+                <span className="font-display text-3xl font-bold" data-testid="change-due">
+                  {formatCurrency(Number(completedSale.change_due))}
+                </span>
+              </div>
+            </div>
+          )}
+        </Modal>
+
+        {shiftLoaded && !shift && !closedShift && activeCounter && (
+          <OpenShiftModal
+            counterName={activeCounter.name}
+            canLeave={can('dashboard.view')}
+            onOpen={openShift}
+            onLogout={() => void logout()}
+          />
+        )}
+        {closingShift && <CloseShiftModal onClose={() => setClosingShift(false)} onSubmit={closeShift} />}
+        {closedShift && <ShiftSummaryModal shift={closedShift} onClose={() => setClosedShift(null)} />}
       </div>
     </div>
   );

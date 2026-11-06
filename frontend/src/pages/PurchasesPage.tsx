@@ -1,12 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Building2, ExternalLink, Save } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
 import { Card, CardTitle, Button, Input, Select } from '@/components/ui';
-import { useSupplierStore } from '@/store';
+import { suppliersApi } from '@/services/endpoints';
+import { mapSupplierFromApi } from '@/services/suppliers';
 import { useTranslation } from '@/i18n';
-import { formatCurrency } from '@/utils';
-import type { GRNLine } from '@/types';
+import { formatCurrency, localDate } from '@/utils';
+import type { GRNLine, Supplier } from '@/types';
 
 const SAMPLE_LINES: GRNLine[] = [
   { id: '1', alu: 'SPR15', productName: 'Sprite 1.5 LTR', cases: 2, qty: 12, free: 0, disc: 0, discPercent: 0, freight: 0, rate: 125.83, cost: 125.15, totalAmount: 1509.96, totalDiscPercent: 0, lineTotal: 1502.76, marginPercent: 10.95, retail: 140 },
@@ -17,29 +18,41 @@ const SAMPLE_LINES: GRNLine[] = [
 
 function calcGrandTotal(
   lines: GRNLine[],
+  discPercent: number,
   flatDisc: number,
   freight: number,
   expense: number,
   salesTaxPercent: number,
 ) {
   const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
-  const tax = (subtotal * salesTaxPercent) / 100;
-  return Math.max(0, subtotal - flatDisc + freight + expense + tax);
+  const discounted = subtotal - (subtotal * discPercent) / 100 - flatDisc;
+  const tax = (discounted * salesTaxPercent) / 100;
+  return Math.max(0, discounted + freight + expense + tax);
 }
 
 export default function PurchasesPage() {
   const { t } = useTranslation();
-  const { suppliers, getSupplierById } = useSupplierStore();
-  const activeSuppliers = suppliers.filter((s) => s.status === 'active');
+  const [activeSuppliers, setActiveSuppliers] = useState<Supplier[]>([]);
+  const getSupplierById = (id: string) => activeSuppliers.find((s) => s.id === id);
 
-  const [supplierId, setSupplierId] = useState(activeSuppliers[0]?.id ?? '');
+  const [supplierId, setSupplierId] = useState('');
+
+  useEffect(() => {
+    suppliersApi.getAll({ status: 'active', page_size: 100, ordering: 'name' })
+      .then(({ data }) => {
+        const suppliers = data.results.map(mapSupplierFromApi);
+        setActiveSuppliers(suppliers);
+        setSupplierId((current) => current || suppliers[0]?.id || '');
+      })
+      .catch(() => setActiveSuppliers([]));
+  }, []);
   const [poNo, setPoNo] = useState('');
   const [wkNo] = useState('4821');
   const [type, setType] = useState<'credit' | 'cash'>('credit');
   const [autoRates, setAutoRates] = useState(true);
   const [filterSupplierInventory, setFilterSupplierInventory] = useState(false);
   const [lines] = useState<GRNLine[]>(SAMPLE_LINES);
-  const [flatDisc, setFlatDisc] = useState(5000);
+  const [flatDisc, setFlatDisc] = useState(0);
   const [discPercent, setDiscPercent] = useState(0);
   const [freight, setFreight] = useState(0);
   const [salesTaxPercent, setSalesTaxPercent] = useState(0);
@@ -53,8 +66,8 @@ export default function PurchasesPage() {
   const totalQty = lines.reduce((s, l) => s + l.qty, 0);
   const totalRetail = lines.reduce((s, l) => s + l.retail * l.qty, 0);
   const grandTotal = useMemo(
-    () => calcGrandTotal(lines, flatDisc, freight, expense, salesTaxPercent),
-    [lines, flatDisc, freight, expense, salesTaxPercent],
+    () => calcGrandTotal(lines, discPercent, flatDisc, freight, expense, salesTaxPercent),
+    [lines, discPercent, flatDisc, freight, expense, salesTaxPercent],
   );
 
   return (
@@ -64,10 +77,10 @@ export default function PurchasesPage() {
         subtitle={t('purchases.subtitle')}
         actions={
           <div className="flex gap-2">
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" disabled>
               <Save className="h-4 w-4" /> {t('purchases.draftSave')}
             </Button>
-            <Button variant="accent" size="sm" disabled={!supplierId}>
+            <Button variant="accent" size="sm" disabled>
               {t('purchases.purchaseComplete')}
             </Button>
           </div>
@@ -75,12 +88,16 @@ export default function PurchasesPage() {
       />
 
       <main className="page-bg flex-1 overflow-y-auto p-4 lg:p-6">
+        <p role="status" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          {t('purchases.previewNotice')}
+        </p>
+
         {/* GRN Header */}
         <Card hover className="mb-4" padding="sm">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
             <Input label="Wk No" value={wkNo} disabled />
             <Input label="PO No" value={poNo} onChange={(e) => setPoNo(e.target.value)} placeholder="451012172" />
-            <Input label="Date" type="date" defaultValue={new Date().toISOString().split('T')[0]} />
+            <Input label="Date" type="date" defaultValue={localDate()} />
             <Select
               label={t('purchases.selectSupplier')}
               value={supplierId}
@@ -128,7 +145,7 @@ export default function PurchasesPage() {
           <div className="border-b border-brand-100 px-4 py-3 dark:border-brand-800">
             <div className="flex items-center justify-between">
               <CardTitle>{t('purchases.purchaseItems')}</CardTitle>
-              <Button variant="accent" size="sm"><Plus className="h-4 w-4" /> {t('purchases.addLine')}</Button>
+              <Button variant="accent" size="sm" disabled><Plus className="h-4 w-4" /> {t('purchases.addLine')}</Button>
             </div>
           </div>
           <div className="overflow-x-auto">

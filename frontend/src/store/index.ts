@@ -1,8 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Theme, CartItem, Counter, Supplier, Product } from '@/types';
-import { MOCK_SUPPLIERS, MOCK_PRODUCTS } from '@/utils/mockData';
-import { deriveStockStatus } from '@/utils/inventoryUtils';
+import type { Theme, CartItem, Terminal, Supplier, Product, User } from '@/types';
+import { authApi, inventoryApi } from '@/services/endpoints';
+import { mapProductFromApi, mapProductToApi } from '@/services/products';
 
 interface ThemeState {
   theme: Theme;
@@ -21,16 +21,69 @@ export const useThemeStore = create<ThemeState>()(
   ),
 );
 
+interface AuthState {
+  user: User | null;
+  loading: boolean;
+  load: () => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+  clear: () => void;
+}
+
+export const useAuthStore = create<AuthState>((set, get) => ({
+  user: null,
+  loading: true,
+  load: async () => {
+    try {
+      const { data } = await authApi.session();
+      set({ user: data.user, loading: false });
+    } catch {
+      set({ user: null, loading: false });
+    }
+  },
+  login: async (email, password) => {
+    const { data } = await authApi.login(email, password);
+    set({ user: data.user });
+  },
+  logout: async () => {
+    await authApi.logout();
+    get().clear();
+  },
+  clear: () => {
+    usePOSStore.getState().clearCart();
+    set({ user: null });
+  },
+}));
+
+/** Permission check for hiding UI. The server enforces the same rules on every request. */
+export function useCan() {
+  const permissions = useAuthStore((state) => state.user?.permissions);
+  return (code: string) => !!permissions?.includes(code);
+}
+
+/** Where someone lands after login: the first area their role can use. */
+export function homePath(user: User | null): string {
+  const can = (code: string) => !!user?.permissions.includes(code);
+  if (can('dashboard.view')) return '/dashboard';
+  if (can('pos.sell')) return '/pos';
+  if (can('products.edit')) return '/inventory';
+  if (can('sales.view')) return '/sales';
+  return '/settings';
+}
+
+const lineAmount = (item: CartItem) => Math.round(item.product.salePrice * item.quantity * 100) / 100;
+
 interface POSState {
-  activeCounter: Counter;
+  activeCounter: Terminal | null;
   cart: CartItem[];
   scannerInput: string;
-  setActiveCounter: (counter: Counter) => void;
+  setActiveCounter: (counter: Terminal) => void;
   setScannerInput: (value: string) => void;
-  addToCart: (item: CartItem) => void;
+  addToCart: (product: Product) => void;
   updateQuantity: (productId: string, quantity: number) => void;
   removeFromCart: (productId: string) => void;
   clearCart: () => void;
+  syncCart: (products: Product[]) => void;
   cartTotal: () => number;
   cartItemCount: () => number;
 }
@@ -38,24 +91,21 @@ interface POSState {
 export const usePOSStore = create<POSState>()(
   persist(
     (set, get) => ({
-      activeCounter: { id: '1', name: 'Counter 1', active: true },
+      activeCounter: null,
       cart: [],
       scannerInput: '',
       setActiveCounter: (counter) => set({ activeCounter: counter }),
       setScannerInput: (value) => set({ scannerInput: value }),
-      addToCart: (item) => {
+      addToCart: (product) => {
         const cart = get().cart;
-        const existing = cart.find((c) => c.product.id === item.product.id);
-        if (existing) {
+        if (cart.some((c) => c.product.id === product.id)) {
           set({
             cart: cart.map((c) =>
-              c.product.id === item.product.id
-                ? { ...c, quantity: c.quantity + item.quantity }
-                : c,
+              c.product.id === product.id ? { ...c, quantity: c.quantity + 1 } : c,
             ),
           });
         } else {
-          set({ cart: [...cart, item] });
+          set({ cart: [...cart, { product, quantity: 1 }] });
         }
       },
       updateQuantity: (productId, quantity) => {
@@ -72,14 +122,23 @@ export const usePOSStore = create<POSState>()(
       removeFromCart: (productId) =>
         set({ cart: get().cart.filter((c) => c.product.id !== productId) }),
       clearCart: () => set({ cart: [], scannerInput: '' }),
-      cartTotal: () =>
-        get().cart.reduce(
-          (sum, item) => sum + item.product.price * item.quantity - item.discount,
-          0,
-        ),
+      // A saved bill can outlive a price change, and the server always charges the current price.
+      syncCart: (products) => {
+        const byId = new Map(products.map((p) => [p.id, p]));
+        set({
+          cart: get().cart.flatMap((c) => {
+            const product = byId.get(c.product.id);
+            return product ? [{ ...c, product }] : [];
+          }),
+        });
+      },
+      cartTotal: () => get().cart.reduce((sum, item) => sum + lineAmount(item), 0),
       cartItemCount: () => get().cart.reduce((sum, item) => sum + item.quantity, 0),
     }),
-    { name: 'smartshop-pos-draft' },
+    {
+      name: 'smartshop-pos-draft-v2',
+      partialize: ({ activeCounter, cart }) => ({ activeCounter, cart }),
+    },
   ),
 );
 
@@ -99,85 +158,58 @@ export const useAppStore = create<AppState>((set, get) => ({
 
 export type SupplierFormData = Omit<Supplier, 'id' | 'totalPurchases' | 'createdAt'>;
 
-interface SupplierState {
-  suppliers: Supplier[];
-  addSupplier: (data: SupplierFormData) => void;
-  updateSupplier: (id: string, data: SupplierFormData) => void;
-  deleteSupplier: (id: string) => void;
-  getSupplierById: (id: string) => Supplier | undefined;
-}
-
-export const useSupplierStore = create<SupplierState>()(
-  persist(
-    (set, get) => ({
-      suppliers: MOCK_SUPPLIERS,
-      addSupplier: (data) => {
-        const newSupplier: Supplier = {
-          ...data,
-          id: crypto.randomUUID(),
-          totalPurchases: 0,
-          createdAt: new Date().toISOString().split('T')[0],
-        };
-        set({ suppliers: [...get().suppliers, newSupplier] });
-      },
-      updateSupplier: (id, data) => {
-        set({
-          suppliers: get().suppliers.map((s) =>
-            s.id === id ? { ...s, ...data } : s,
-          ),
-        });
-      },
-      deleteSupplier: (id) => {
-        set({ suppliers: get().suppliers.filter((s) => s.id !== id) });
-      },
-      getSupplierById: (id) => get().suppliers.find((s) => s.id === id),
-    }),
-    { name: 'smartshop-suppliers' },
-  ),
-);
-
-export type ProductFormData = Omit<Product, 'id' | 'status'>;
+export type ProductFormData = Omit<Product, 'id' | 'status' | 'salePrice'>;
 
 interface InventoryState {
   products: Product[];
-  addProduct: (data: ProductFormData) => Product;
-  updateProduct: (id: string, data: ProductFormData) => void;
-  deleteProduct: (id: string) => void;
+  categories: string[];
+  loading: boolean;
+  error: boolean;
+  fetchProducts: () => Promise<void>;
+  addProduct: (data: ProductFormData) => Promise<Product>;
+  updateProduct: (id: string, data: ProductFormData) => Promise<void>;
+  deleteProduct: (id: string) => Promise<void>;
+  applySale: (lines: { productId: string; quantity: number }[]) => void;
 }
 
-function toProduct(data: ProductFormData, existing?: Product): Product {
-  const today = new Date().toISOString().split('T')[0];
-  return {
-    ...data,
-    id: existing?.id ?? crypto.randomUUID(),
-    status: deriveStockStatus(data),
-    createdAt: existing?.createdAt ?? data.createdAt ?? today,
-    updatedAt: today,
-  };
-}
-
-export const useInventoryStore = create<InventoryState>()(
-  persist(
-    (set, get) => ({
-      products: MOCK_PRODUCTS,
-      addProduct: (data) => {
-        const newProduct = toProduct(data);
-        set({ products: [...get().products, newProduct] });
-        return newProduct;
-      },
-      updateProduct: (id, data) => {
-        const existing = get().products.find((p) => p.id === id);
-        if (!existing) return;
-        set({
-          products: get().products.map((p) =>
-            p.id === id ? toProduct(data, existing) : p,
-          ),
-        });
-      },
-      deleteProduct: (id) => {
-        set({ products: get().products.filter((p) => p.id !== id) });
-      },
-    }),
-    { name: 'smartshop-inventory' },
-  ),
-);
+export const useInventoryStore = create<InventoryState>((set, get) => ({
+  products: [],
+  categories: [],
+  loading: true,
+  error: false,
+  fetchProducts: async () => {
+    try {
+      const [products, categories] = await Promise.all([inventoryApi.products(), inventoryApi.categories()]);
+      set({
+        products: products.data.map(mapProductFromApi),
+        categories: categories.data,
+        loading: false,
+        error: false,
+      });
+    } catch {
+      set({ loading: false, error: true });
+    }
+  },
+  addProduct: async (data) => {
+    const response = await inventoryApi.createProduct(mapProductToApi(data));
+    const product = mapProductFromApi(response.data);
+    set({ products: [...get().products, product] });
+    return product;
+  },
+  updateProduct: async (id, data) => {
+    const existing = get().products.find((p) => p.id === id);
+    const response = await inventoryApi.updateProduct(id, mapProductToApi(data, existing));
+    const updated = mapProductFromApi(response.data);
+    set({ products: get().products.map((p) => (p.id === id ? updated : p)) });
+  },
+  deleteProduct: async (id) => {
+    await inventoryApi.deleteProduct(id);
+    set({ products: get().products.filter((p) => p.id !== id) });
+  },
+  applySale: (lines) => {
+    const sold = new Map(lines.map((line) => [line.productId, line.quantity]));
+    set({
+      products: get().products.map((p) => (sold.has(p.id) ? { ...p, stock: p.stock - sold.get(p.id)! } : p)),
+    });
+  },
+}));

@@ -10,18 +10,20 @@ import {
   Zap,
   Building2,
   X,
+  LogOut,
+  type LucideIcon,
 } from 'lucide-react';
-import { cn } from '@/utils';
-import { useAppStore } from '@/store';
+import { cn, ROLE_LABEL_KEYS } from '@/utils';
+import { useAppStore, useAuthStore, useCan } from '@/store';
 import { useTranslation } from '@/i18n';
 
-const navItems = [
-  { to: '/dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
-  { to: '/pos', icon: ShoppingCart, labelKey: 'nav.pos', highlight: true },
-  { to: '/inventory', icon: Package, labelKey: 'nav.inventory' },
-  { to: '/suppliers', icon: Building2, labelKey: 'nav.suppliers' },
-  { to: '/purchases', icon: Truck, labelKey: 'nav.purchases' },
-  { to: '/sales', icon: Receipt, labelKey: 'nav.sales' },
+const navItems: { to: string; permission?: string; icon: LucideIcon; labelKey: string; highlight?: boolean }[] = [
+  { to: '/dashboard', permission: 'dashboard.view', icon: LayoutDashboard, labelKey: 'nav.dashboard' },
+  { to: '/pos', permission: 'pos.sell', icon: ShoppingCart, labelKey: 'nav.pos', highlight: true },
+  { to: '/inventory', permission: 'products.edit', icon: Package, labelKey: 'nav.inventory' },
+  { to: '/suppliers', permission: 'suppliers.view', icon: Building2, labelKey: 'nav.suppliers' },
+  { to: '/purchases', permission: 'purchases.view', icon: Truck, labelKey: 'nav.purchases' },
+  { to: '/sales', permission: 'sales.view', icon: Receipt, labelKey: 'nav.sales' },
   { to: '/settings', icon: Settings, labelKey: 'nav.settings' },
 ];
 
@@ -31,6 +33,8 @@ interface SidebarProps {
 
 export default function Sidebar({ mobile = false }: SidebarProps) {
   const { sidebarCollapsed, toggleSidebar, setMobileSidebarOpen } = useAppStore();
+  const { user, logout } = useAuthStore();
+  const can = useCan();
   const { t } = useTranslation();
   const collapsed = !mobile && sidebarCollapsed;
 
@@ -67,15 +71,8 @@ export default function Sidebar({ mobile = false }: SidebarProps) {
         )}
       </div>
 
-      {!collapsed && (
-        <div className="mx-4 mb-4 rounded-xl bg-gradient-to-r from-accent/10 to-transparent px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-accent">{t('common.pakistan')}</p>
-          <p className="text-xs text-brand-500">{t('nav.branchOpen')}</p>
-        </div>
-      )}
-
       <nav className="flex-1 space-y-1 overflow-y-auto px-3">
-        {navItems.map(({ to, icon: Icon, labelKey, highlight }) => (
+        {navItems.filter((item) => !item.permission || can(item.permission)).map(({ to, icon: Icon, labelKey, highlight }) => (
           <NavLink
             key={to}
             to={to}
@@ -95,6 +92,24 @@ export default function Sidebar({ mobile = false }: SidebarProps) {
           </NavLink>
         ))}
       </nav>
+
+      <div className="mx-3 mt-3 flex items-center gap-2 border-t border-brand-200/80 pt-3 dark:border-brand-800/80">
+        {!collapsed && (
+          <div className="min-w-0 flex-1 px-1">
+            <p className="truncate text-sm font-semibold">{user?.full_name}</p>
+            <p className="truncate text-xs text-brand-500">{user?.role && t(ROLE_LABEL_KEYS[user.role])}</p>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => void logout()}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-brand-500 hover:bg-brand-100 hover:text-red-600 dark:hover:bg-brand-800"
+          aria-label={t('common.logout')}
+          title={t('common.logout')}
+        >
+          <LogOut className="h-4 w-4" />
+        </button>
+      </div>
 
       {!mobile && (
         <button

@@ -1,8 +1,9 @@
-from django.db.models import Q
+from django.db.models import ProtectedError, Q
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from auth.permissions import requires
 from suppliers.models import Supplier
 from suppliers.serializers import (
     CreateSupplierSerializer, SupplierListSerializer,
@@ -12,6 +13,8 @@ from suppliers.serializers import (
 
 
 class ListCreateSupplierDataView(APIView):
+    permission_classes = [requires('suppliers.view', 'suppliers.edit')]
+
     SORTABLE_FIELDS = {
         "id",
         "name",
@@ -62,7 +65,7 @@ class ListCreateSupplierDataView(APIView):
             "-created_at",
         )
 
-        ordering_field = ordering.replace("-", "")
+        ordering_field = ordering.removeprefix("-")
 
         if ordering_field in self.SORTABLE_FIELDS:
             queryset = queryset.order_by(ordering)
@@ -126,6 +129,7 @@ class ListCreateSupplierDataView(APIView):
 
 
 class RetrieveUpdateDeleteSupplierDataView(APIView):
+    permission_classes = [requires('suppliers.view', 'suppliers.edit')]
 
     def get_object(self, supplier_id):
         try:
@@ -206,12 +210,19 @@ class RetrieveUpdateDeleteSupplierDataView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        supplier.delete()
+        try:
+            supplier.delete()
+        except ProtectedError:
+            return Response(
+                {"detail": "This supplier has products linked to it. Mark it inactive instead."},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BulkDeleteSupplierDataView(APIView):
+    permission_classes = [requires('suppliers.view', 'suppliers.edit')]
 
     def post(self, request):
         serializer = BulkDeleteSupplierSerializer(
@@ -221,11 +232,17 @@ class BulkDeleteSupplierDataView(APIView):
 
         supplier_ids = serializer.validated_data["ids"]
 
-        deleted_count, _ = (
-            Supplier.objects
-            .filter(id__in=supplier_ids)
-            .delete()
-        )
+        try:
+            deleted_count, _ = (
+                Supplier.objects
+                .filter(id__in=supplier_ids)
+                .delete()
+            )
+        except ProtectedError:
+            return Response(
+                {"detail": "Some suppliers have products linked to them. Mark them inactive instead."},
+                status=status.HTTP_409_CONFLICT,
+            )
 
         return Response(
             {

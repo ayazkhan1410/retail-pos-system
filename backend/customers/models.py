@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db import models, transaction
+from django.db import models
 
 from audit.models import AppendOnlyModel
 
@@ -40,13 +40,3 @@ class CustomerLedgerEntry(AppendOnlyModel):
 
     class Meta:
         ordering = ['-id']
-
-
-def post_customer_entry(customer_id, delta, kind, user, method='', reference='', shift=None):
-    with transaction.atomic():
-        customer = Customer.objects.select_for_update().get(pk=customer_id)
-        customer.balance += delta
-        customer.save(update_fields=['balance'])
-        return CustomerLedgerEntry.objects.create(
-            customer=customer, delta=delta, kind=kind, method=method, reference=reference, shift=shift, user=user,
-        )

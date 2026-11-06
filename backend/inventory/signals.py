@@ -2,7 +2,7 @@ from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
 from inventory.models import Product, ProductBarcode
-from inventory.search import delete_product, es_enabled, index_product
+from inventory.services import delete_product, es_enabled, index_product
 
 
 @receiver(post_save, sender=Product)

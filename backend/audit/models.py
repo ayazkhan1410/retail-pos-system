@@ -33,7 +33,3 @@ class AuditLog(AppendOnlyModel):
 
     class Meta:
         ordering = ['-id']
-
-
-def log_event(user, action, target='', details=None):
-    AuditLog.objects.create(user=user, action=action, target=target, details=details or {})

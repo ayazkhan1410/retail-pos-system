@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from audit.models import log_event
+from audit.services import log_event
 from auth.models import UserRole
 from auth.tests import make_user
 from inventory.models import Batch, Product, default_branch

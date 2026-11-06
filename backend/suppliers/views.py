@@ -3,9 +3,10 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from audit.models import log_event
+from audit.services import log_event
 from auth.permissions import requires
-from suppliers.models import Supplier, SupplierLedgerEntry, post_supplier_entry
+from suppliers.models import Supplier, SupplierLedgerEntry
+from suppliers.services import post_supplier_entry
 from suppliers.serializers import (
     BulkDeleteSupplierSerializer,
     CreateSupplierSerializer,

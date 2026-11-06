@@ -3,7 +3,8 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from audit.models import AuditLog, log_event
+from audit.models import AuditLog
+from audit.services import log_event
 from auth.permissions import requires
 
 

@@ -7,9 +7,10 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from audit.models import log_event
+from audit.services import log_event
 from auth.permissions import requires
-from customers.models import Customer, CustomerLedgerEntry, post_customer_entry
+from customers.models import Customer, CustomerLedgerEntry
+from customers.services import post_customer_entry
 from sales.models import Shift, Terminal
 
 

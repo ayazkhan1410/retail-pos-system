@@ -9,13 +9,15 @@ from django.db import transaction
 from django.utils import timezone
 
 from auth.models import CustomUser, UserRole
-from customers.models import Customer, CustomerLedgerEntry, post_customer_entry
+from customers.models import Customer, CustomerLedgerEntry
+from customers.services import post_customer_entry
 from finance.models import Expense
 from inventory.models import Batch, Category, Product, StockLevel, StockMovement, default_branch
 from inventory.services import add_batch, move_stock
 from sales.models import Payment, Sale, SaleLine, SaleReturn, Shift, Terminal
 from sales.services import close_shift, create_return, create_sale, expected_cash, open_shift
-from suppliers.models import Supplier, SupplierLedgerEntry, post_supplier_entry
+from suppliers.models import Supplier, SupplierLedgerEntry
+from suppliers.services import post_supplier_entry
 
 # name, barcode, category, cost, price, stock, tax %, days until expiry
 PRODUCTS = [

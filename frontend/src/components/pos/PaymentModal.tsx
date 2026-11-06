@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Button, Input } from '@/components/ui';
+import { Modal, Button, Input, Select } from '@/components/ui';
 import { useTranslation } from '@/i18n';
 import { formatCurrency } from '@/utils';
-import type { PaymentMethod } from '@/types';
+import type { Customer, PaymentMethod } from '@/types';
 
 const METHODS: { method: PaymentMethod; labelKey: string }[] = [
   { method: 'cash', labelKey: 'pos.cash' },
   { method: 'jazzcash', labelKey: 'pos.jazzcash' },
   { method: 'easypaisa', labelKey: 'pos.easypaisa' },
   { method: 'card', labelKey: 'pos.cardShort' },
+  { method: 'credit', labelKey: 'pos.onCredit' },
 ];
 
 export interface PaymentResult {
   discount: number;
+  customer: number | null;
   payments: { method: PaymentMethod; amount: string; reference?: string }[];
 }
 
@@ -21,6 +23,7 @@ interface PaymentModalProps {
   total: number;
   initialMethod: PaymentMethod;
   canDiscount: boolean;
+  customers: Customer[];
   submitting: boolean;
   error: string;
   onClose: () => void;
@@ -28,10 +31,11 @@ interface PaymentModalProps {
 }
 
 export default function PaymentModal({
-  open, total, initialMethod, canDiscount, submitting, error, onClose, onConfirm,
+  open, total, initialMethod, canDiscount, customers, submitting, error, onClose, onConfirm,
 }: PaymentModalProps) {
   const { t } = useTranslation();
   const [discount, setDiscount] = useState('');
+  const [customerId, setCustomerId] = useState('');
   const [amounts, setAmounts] = useState<Partial<Record<PaymentMethod, string>>>({});
   const [references, setReferences] = useState<Partial<Record<PaymentMethod, string>>>({});
   const firstInput = useRef<HTMLInputElement>(null);
@@ -39,6 +43,7 @@ export default function PaymentModal({
   useEffect(() => {
     if (!open) return;
     setDiscount('');
+    setCustomerId('');
     setAmounts({});
     setReferences({});
     window.requestAnimationFrame(() => firstInput.current?.focus());
@@ -69,6 +74,7 @@ export default function PaymentModal({
     if (!canSubmit) return;
     onConfirm({
       discount: discountValue,
+      customer: customerId ? Number(customerId) : null,
       payments: payments.map((p) => ({
         method: p.method,
         amount: p.amount.toFixed(2),
@@ -77,7 +83,8 @@ export default function PaymentModal({
     });
   };
 
-  const ordered = [...METHODS].sort(
+  const customer = customers.find((item) => String(item.id) === customerId);
+  const ordered = [...METHODS].filter(({ method }) => method !== 'credit' || customer).sort(
     (a, b) => Number(b.method === initialMethod) - Number(a.method === initialMethod),
   );
 
@@ -115,6 +122,26 @@ export default function PaymentModal({
           />
         )}
 
+        {customers.length > 0 && (
+          <div>
+            <Select
+              id="sale-customer"
+              label={t('pos.customer')}
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
+              options={[
+                { value: '', label: t('pos.walkIn') },
+                ...customers.map((item) => ({ value: String(item.id), label: item.phone ? `${item.name} (${item.phone})` : item.name })),
+              ]}
+            />
+            {customer && (
+              <p className="mt-1 text-xs text-brand-500">
+                {t('pos.khataStatus', { balance: formatCurrency(Number(customer.balance)), limit: formatCurrency(Number(customer.credit_limit)) })}
+              </p>
+            )}
+          </div>
+        )}
+
         {ordered.map(({ method, labelKey }, index) => (
           <div key={method} className="grid grid-cols-2 gap-2">
             <Input
@@ -128,7 +155,7 @@ export default function PaymentModal({
               value={amounts[method] ?? ''}
               onChange={(e) => setAmounts((prev) => ({ ...prev, [method]: e.target.value }))}
             />
-            {method !== 'cash' && (
+            {method !== 'cash' && method !== 'credit' && (
               <Input
                 id={`ref-${method}`}
                 label={t('pos.reference')}

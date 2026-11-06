@@ -305,3 +305,120 @@ class ConcurrencyTests(TransactionTestCase):
         self.assertNotIn(500, results)
         shift.refresh_from_db()
         self.assertEqual(shift.expected_cash, Decimal(100) * shift.sales.count())
+
+
+class ReturnTests(TestCase):
+    def setUp(self):
+        self.user = make_user(UserRole.MANAGER)
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.terminal = Terminal.objects.get(code='C1')
+        self.shift = Shift.objects.create(terminal=self.terminal, opened_by=self.user, opening_cash=Decimal(1000))
+        self.product = make_product(self.user, price=100)
+        self.sale = self.client.post('/api/sales/', {
+            'client_uuid': str(uuid.uuid4()), 'terminal': self.terminal.pk, 'discount': '20',
+            'lines': [{'product': self.product.pk, 'quantity': '2'}],
+            'payments': [{'method': 'cash', 'amount': '180'}],
+        }, format='json').data
+        self.line = self.sale['lines'][0]['id']
+
+    def give_back(self, quantity='1', method='cash', restock=True, client_uuid=None):
+        return self.client.post('/api/sales/returns/', {
+            'client_uuid': client_uuid or str(uuid.uuid4()), 'sale': self.sale['id'], 'method': method,
+            'lines': [{'sale_line': self.line, 'quantity': quantity, 'restock': restock}],
+        }, format='json')
+
+    def test_refund_is_what_was_really_paid_and_stock_returns(self):
+        response = self.give_back()
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Decimal(response.data['return']['total']), 90)  # 100 less half the bill discount
+        self.assertEqual(stock_of(self.product), 9)
+        self.assertEqual(Decimal(response.data['sale']['returned_total']), 90)
+        self.assertEqual(Decimal(response.data['sale']['lines'][0]['returned_quantity']), 1)
+
+    def test_cannot_return_more_than_sold(self):
+        self.assertEqual(self.give_back('3').status_code, 400)
+        self.give_back('1')
+        self.give_back('1')
+        self.assertEqual(self.give_back('1').status_code, 400)
+        self.assertEqual(stock_of(self.product), 10)
+
+    def test_damaged_item_is_not_restocked(self):
+        self.give_back(restock=False)
+        self.assertEqual(stock_of(self.product), 8)
+
+    def test_retry_refunds_once(self):
+        key = str(uuid.uuid4())
+        self.assertEqual(self.give_back(client_uuid=key).status_code, 201)
+        self.assertEqual(self.give_back(client_uuid=key).status_code, 200)
+        self.assertEqual(stock_of(self.product), 9)
+
+    def test_cash_refund_leaves_the_drawer(self):
+        self.give_back()
+        closed = self.client.post(f'/api/sales/shifts/{self.shift.pk}/close/', {'counted_cash': '1090'}, format='json').data
+        self.assertEqual(Decimal(closed['expected_cash']), 1090)
+
+    def test_cash_refund_needs_open_shift_but_wallet_does_not(self):
+        Shift.objects.filter(pk=self.shift.pk).update(closed_at=timezone.now())
+        self.assertEqual(self.give_back().status_code, 400)
+        self.assertEqual(self.give_back(method='jazzcash').status_code, 201)
+
+    def test_item_from_another_invoice_is_refused(self):
+        other = self.client.post('/api/sales/', {
+            'client_uuid': str(uuid.uuid4()), 'terminal': self.terminal.pk,
+            'lines': [{'product': self.product.pk, 'quantity': '1'}],
+            'payments': [{'method': 'cash', 'amount': '100'}],
+        }, format='json').data
+        self.line = other['lines'][0]['id']
+        self.assertEqual(self.give_back().status_code, 400)
+
+    def test_cashier_needs_permission(self):
+        cashier = APIClient()
+        cashier.force_authenticate(make_user())
+        self.assertEqual(cashier.post('/api/sales/returns/', {}, format='json').status_code, 403)
+
+    def test_dashboard_revenue_is_net_of_returns(self):
+        self.give_back()
+        self.assertEqual(self.client.get('/api/sales/dashboard/').data['today_revenue'], 90)
+
+
+class OfflineSaleTests(TestCase):
+    def setUp(self):
+        self.user = make_user()
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.terminal = Terminal.objects.get(code='C1')
+        self.shift = Shift.objects.create(terminal=self.terminal, opened_by=self.user, opening_cash=0)
+        self.product = make_product(self.user, price=100)
+
+    def sync(self, **line):
+        return self.client.post('/api/sales/', {
+            'client_uuid': str(uuid.uuid4()), 'terminal': self.terminal.pk, 'offline': True,
+            'sold_at': (timezone.now() - timedelta(hours=2)).isoformat(),
+            'lines': [{'product': self.product.pk, 'quantity': '1', **line}],
+            'payments': [{'method': 'cash', 'amount': '100'}],
+        }, format='json')
+
+    def test_keeps_charged_price_and_flags_the_difference(self):
+        Product.objects.filter(pk=self.product.pk).update(price=Decimal(150))
+        response = self.sync(unit_price='100')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(response.data['is_offline'])
+        self.assertEqual(Decimal(response.data['total']), 100)
+        self.assertEqual(AuditLog.objects.get(action='offline_sale').details['price_changes'][0]['current'], '150.00')
+        self.assertLess(Sale.objects.get().created_at, timezone.now() - timedelta(hours=1))
+
+    def test_syncs_after_item_or_shift_changed(self):
+        Product.objects.filter(pk=self.product.pk).update(active=False)
+        Shift.objects.filter(pk=self.shift.pk).update(closed_at=timezone.now())
+        response = self.sync(unit_price='100')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(Sale.objects.get().shift_id, self.shift.pk)
+
+    def test_client_price_is_ignored_unless_offline(self):
+        response = self.client.post('/api/sales/', {
+            'client_uuid': str(uuid.uuid4()), 'terminal': self.terminal.pk,
+            'lines': [{'product': self.product.pk, 'quantity': '1', 'unit_price': '1'}],
+            'payments': [{'method': 'cash', 'amount': '1'}],
+        }, format='json')
+        self.assertEqual(response.status_code, 400)

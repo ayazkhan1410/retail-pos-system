@@ -6,7 +6,7 @@ from rest_framework.exceptions import PermissionDenied
 
 from audit.models import log_event
 from inventory.models import Branch, Category, Product, StockMovement, default_branch
-from inventory.services import set_stock
+from inventory.services import add_batch, set_stock
 
 AUDITED_FIELDS = ('price', 'cost', 'sales_tax_percent', 'disc_percent', 'disc_amount', 'active')
 
@@ -52,6 +52,8 @@ class ProductSerializer(serializers.ModelSerializer):
         product = Product.objects.create(**validated_data)
         user = self.context['request'].user
         set_stock(product, default_branch(), stock, StockMovement.Reason.OPENING, user)
+        if product.expiry_date and stock > 0:
+            add_batch(product, default_branch(), stock, product.expiry_date)
         product.stock = stock
         log_event(user, 'product_created', product.name, {'barcode': product.barcode, 'stock': str(stock)})
         return product
@@ -75,3 +77,8 @@ class ProductSerializer(serializers.ModelSerializer):
         if changes:
             log_event(user, 'product_updated', product.name, changes)
         return product
+
+
+class AdjustStockInput(serializers.Serializer):
+    counted = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=Decimal(0))
+    reason = serializers.ChoiceField(choices=[StockMovement.Reason.COUNT, StockMovement.Reason.DAMAGE, StockMovement.Reason.ADJUSTMENT])

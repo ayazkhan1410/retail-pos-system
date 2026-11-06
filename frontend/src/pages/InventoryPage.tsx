@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo } from 'react';
-import { Plus, Search, Pencil, Trash2, Package, AlertTriangle, Filter, X, Printer } from 'lucide-react';
+import { useEffect, useRef, useState, useMemo } from 'react';
+import { Plus, Search, Pencil, Trash2, Package, AlertTriangle, Filter, X, Printer, Scale, Upload, Ban } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
 import { Card, Button, Input, Badge, StockBadge, Modal, Select } from '@/components/ui';
 import { formatCurrency, cn } from '@/utils';
@@ -16,7 +16,7 @@ import {
 } from '@/utils/inventoryUtils';
 import ProductForm, { type ProductFormSubmitResult } from '@/components/inventory/ProductForm';
 import LabelPrintModal from '@/components/inventory/LabelPrintModal';
-import { apiErrorMessage } from '@/services';
+import { apiErrorMessage, inventoryApi } from '@/services';
 import { useCan, useInventoryStore } from '@/store';
 import { useTranslation } from '@/i18n';
 import type { Product } from '@/types';
@@ -44,6 +44,11 @@ export default function InventoryPage() {
   const { products, loading, error: loadFailed, fetchProducts, addProduct, updateProduct, deleteProduct } = useInventoryStore();
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [adjusting, setAdjusting] = useState<Product | null>(null);
+  const [counted, setCounted] = useState('');
+  const [adjustReason, setAdjustReason] = useState('count');
+  const [importResult, setImportResult] = useState('');
+  const importInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     void fetchProducts();
@@ -124,6 +129,47 @@ export default function InventoryPage() {
     }
   };
 
+  const submitAdjust = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!adjusting) return;
+    setSaving(true);
+    setError('');
+    try {
+      await inventoryApi.adjustStock(adjusting.id, Number(counted), adjustReason);
+      setAdjusting(null);
+      await fetchProducts();
+    } catch (err) {
+      setError(apiErrorMessage(err, t('inventory.saveError')));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const writeOff = async (product: Product) => {
+    if (!window.confirm(t('inventory.confirmWriteOff', { name: product.name }))) return;
+    try {
+      await inventoryApi.writeOffExpired(product.id);
+      await fetchProducts();
+    } catch (err) {
+      setError(apiErrorMessage(err, t('inventory.saveError')));
+    }
+  };
+
+  const importCsv = async (file: File | undefined) => {
+    if (!file) return;
+    setImportResult('');
+    setError('');
+    try {
+      const { data } = await inventoryApi.importProducts(file);
+      const firstError = data.errors[0] ? ` ${t('inventory.importFirstError', { row: data.errors[0].row, error: data.errors[0].error })}` : '';
+      setImportResult(t('inventory.importResult', { created: data.created, failed: data.error_count }) + firstError);
+      await fetchProducts();
+    } catch (err) {
+      setError(apiErrorMessage(err, t('inventory.saveError')));
+    }
+    if (importInput.current) importInput.current.value = '';
+  };
+
   const openLabelPrint = (product: Product) => {
     setLabelProduct(product);
     setLabelModalOpen(true);
@@ -143,18 +189,25 @@ export default function InventoryPage() {
         title={t('inventory.title')}
         subtitle={t('inventory.subtitle', { total: stats.total, low: stats.low_stock, out: stats.out_of_stock })}
         actions={
+          <>
+          <input ref={importInput} type="file" accept=".csv,text/csv" className="hidden" aria-label={t('inventory.importCsv')} onChange={(e) => void importCsv(e.target.files?.[0])} />
+          <Button variant="outline" size="sm" title={t('inventory.importHint')} onClick={() => importInput.current?.click()}>
+            <Upload className="h-4 w-4" /> {t('inventory.importCsv')}
+          </Button>
           <Button variant="accent" size="sm" onClick={() => { setError(''); setEditingProduct(null); setModalOpen(true); }}>
             <Plus className="h-4 w-4" /> {t('inventory.addProduct')}
           </Button>
+          </>
         }
       />
 
       <main className="page-bg flex-1 overflow-y-auto p-4 sm:p-6">
-        {(loadFailed || (error && !modalOpen)) && (
+        {(loadFailed || (error && !modalOpen && !adjusting)) && (
           <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
             {error || t('inventory.loadError')}
           </p>
         )}
+        {importResult && <p role="status" className="mb-4 rounded-xl border border-brand-200 bg-white px-4 py-3 text-sm dark:border-brand-700 dark:bg-brand-900">{importResult}</p>}
         <div className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {statCards.map((s) => (
             <button key={s.key} type="button" onClick={s.onClick} className="text-left">
@@ -290,6 +343,16 @@ export default function InventoryPage() {
                       <td className="px-4 py-3 sm:px-6"><StockBadge status={status} /></td>
                       <td className="px-4 py-3 sm:px-6">
                         <div className="flex gap-1">
+                          {can('stock.adjust') && (
+                            <Button variant="ghost" size="sm" aria-label={t('inventory.adjustStock')} title={t('inventory.adjustStock')} onClick={() => { setError(''); setCounted(String(product.stock)); setAdjustReason('count'); setAdjusting(product); }}>
+                              <Scale className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                          {can('stock.adjust') && getExpiryStatus(product.expiryDate) === 'expired' && (
+                            <Button variant="ghost" size="sm" aria-label={t('inventory.writeOff')} title={t('inventory.writeOff')} className="text-red-500" onClick={() => void writeOff(product)}>
+                              <Ban className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
                           <Button variant="ghost" size="sm" onClick={() => openLabelPrint(product)} title={t('inventory.printLabel')}>
                             <Printer className="h-3.5 w-3.5" />
                           </Button>
@@ -339,6 +402,36 @@ export default function InventoryPage() {
       >
         {error && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p>}
         <ProductForm product={editingProduct} onSubmit={(data) => void handleSubmit(data)} />
+      </Modal>
+
+      <Modal
+        open={!!adjusting}
+        onClose={() => setAdjusting(null)}
+        preventClose={saving}
+        title={adjusting ? t('inventory.adjustTitle', { name: adjusting.name }) : ''}
+        size="sm"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setAdjusting(null)}>{t('common.cancel')}</Button>
+            <Button variant="accent" type="submit" form="adjust-form" loading={saving}>{t('common.save')}</Button>
+          </>
+        }
+      >
+        <form id="adjust-form" onSubmit={submitAdjust} className="space-y-3">
+          <Input id="adjust-counted" label={t('inventory.countedQty')} type="number" min={0} step="any" required autoFocus value={counted} onChange={(e) => setCounted(e.target.value)} />
+          <Select
+            id="adjust-reason"
+            label={t('sales.reason')}
+            value={adjustReason}
+            onChange={(e) => setAdjustReason(e.target.value)}
+            options={[
+              { value: 'count', label: t('inventory.reasonCount') },
+              { value: 'damage', label: t('inventory.reasonDamage') },
+              { value: 'adjustment', label: t('inventory.reasonOther') },
+            ]}
+          />
+          {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+        </form>
       </Modal>
 
       <LabelPrintModal

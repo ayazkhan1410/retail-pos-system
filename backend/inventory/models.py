@@ -90,7 +90,7 @@ class Product(models.Model):
     is_style_item = models.BooleanField(default=False)
     oem_barcode = models.BooleanField(default=False)
     track_expiry = models.BooleanField(default=False)
-    # shortcut: one expiry per product, move to batches when GRN lands (Phase 2).
+    # Earliest expiry among batches still in stock; kept up to date by inventory.services.
     expiry_date = models.DateField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -123,11 +123,28 @@ class StockLevel(models.Model):
         constraints = [models.UniqueConstraint(fields=['product', 'branch'], name='one_stock_level_per_branch')]
 
 
+class Batch(models.Model):
+    """Stock of one product sharing an expiry date. Sales use the earliest expiry first."""
+
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='batches')
+    branch = models.ForeignKey(Branch, on_delete=models.PROTECT)
+    expiry_date = models.DateField()
+    quantity = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['product', 'branch', 'expiry_date'], name='one_batch_per_expiry')]
+
+
 class StockMovement(AppendOnlyModel):
     class Reason(models.TextChoices):
         OPENING = 'opening', 'Opening balance'
         SALE = 'sale', 'Sale'
         ADJUSTMENT = 'adjustment', 'Adjustment'
+        PURCHASE = 'purchase', 'Purchase'
+        RETURN = 'return', 'Customer return'
+        COUNT = 'count', 'Stock count'
+        DAMAGE = 'damage', 'Damaged'
+        EXPIRED = 'expired', 'Expired write-off'
 
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     branch = models.ForeignKey(Branch, on_delete=models.PROTECT)

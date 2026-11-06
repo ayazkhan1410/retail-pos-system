@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Theme, CartItem, Terminal, Supplier, Product, User } from '@/types';
-import { authApi, inventoryApi } from '@/services/endpoints';
+import { authApi, inventoryApi, salesApi, type NewSale } from '@/services/endpoints';
 import { mapProductFromApi, mapProductToApi } from '@/services/products';
 
 interface ThemeState {
@@ -84,6 +84,9 @@ interface POSState {
   removeFromCart: (productId: string) => void;
   clearCart: () => void;
   syncCart: (products: Product[]) => void;
+  pendingSales: NewSale[];
+  queueSale: (sale: NewSale) => void;
+  syncPending: () => Promise<void>;
   cartTotal: () => number;
   cartItemCount: () => number;
 }
@@ -94,6 +97,21 @@ export const usePOSStore = create<POSState>()(
       activeCounter: null,
       cart: [],
       scannerInput: '',
+      pendingSales: [],
+      queueSale: (sale) => set({ pendingSales: [...get().pendingSales, sale] }),
+      syncPending: async () => {
+        for (const sale of get().pendingSales) {
+          try {
+            await salesApi.create(sale);
+          } catch (err) {
+            // Still offline, or logged out: keep it and try again later. A rejected sale also stays,
+            // visibly counted on the till, because deleting a real sale is never the right fallback.
+            if (!(err as { response?: unknown }).response || (err as { response?: { status?: number } }).response?.status === 403) return;
+            continue;
+          }
+          set({ pendingSales: get().pendingSales.filter((item) => item.client_uuid !== sale.client_uuid) });
+        }
+      },
       setActiveCounter: (counter) => set({ activeCounter: counter }),
       setScannerInput: (value) => set({ scannerInput: value }),
       addToCart: (product) => {
@@ -137,7 +155,7 @@ export const usePOSStore = create<POSState>()(
     }),
     {
       name: 'smartshop-pos-draft-v2',
-      partialize: ({ activeCounter, cart }) => ({ activeCounter, cart }),
+      partialize: ({ activeCounter, cart, pendingSales }) => ({ activeCounter, cart, pendingSales }),
     },
   ),
 );

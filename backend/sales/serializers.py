@@ -3,7 +3,8 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from inventory.models import Product
-from sales.models import Payment, Sale, SaleLine, Shift, Terminal
+from customers.models import Customer
+from sales.models import Payment, Sale, SaleLine, SaleReturn, Shift, Terminal
 
 
 class TerminalSerializer(serializers.ModelSerializer):
@@ -35,6 +36,8 @@ class ShiftSerializer(serializers.ModelSerializer):
 class SaleLineInputSerializer(serializers.Serializer):
     product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
     quantity = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=Decimal('0.001'))
+    # Only honoured with offline=true: what the till charged from its cached prices.
+    unit_price = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal(0), required=False)
 
 
 class PaymentInputSerializer(serializers.Serializer):
@@ -47,14 +50,25 @@ class SaleInputSerializer(serializers.Serializer):
     client_uuid = serializers.UUIDField()
     terminal = serializers.PrimaryKeyRelatedField(queryset=Terminal.objects.filter(active=True))
     discount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal(0), default=Decimal(0))
+    customer = serializers.PrimaryKeyRelatedField(queryset=Customer.objects.all(), required=False, allow_null=True)
+    offline = serializers.BooleanField(default=False)
+    sold_at = serializers.DateTimeField(required=False)
     lines = SaleLineInputSerializer(many=True, allow_empty=False)
     payments = PaymentInputSerializer(many=True)
 
 
 class SaleLineSerializer(serializers.ModelSerializer):
+    returned_quantity = serializers.SerializerMethodField()
+
     class Meta:
         model = SaleLine
-        fields = ('name', 'barcode', 'quantity', 'unit_price', 'discount', 'tax_rate', 'tax_amount', 'line_total')
+        fields = (
+            'id', 'name', 'barcode', 'quantity', 'unit_price', 'discount', 'tax_rate', 'tax_amount',
+            'line_total', 'returned_quantity',
+        )
+
+    def get_returned_quantity(self, line):
+        return str(sum((item.quantity for item in line.return_lines.all()), Decimal(0)))
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -66,12 +80,39 @@ class PaymentSerializer(serializers.ModelSerializer):
 class SaleSerializer(serializers.ModelSerializer):
     terminal_name = serializers.CharField(source='terminal.name')
     cashier_name = serializers.CharField(source='cashier.full_name')
+    customer_name = serializers.CharField(source='customer.name', default='')
+    returned_total = serializers.SerializerMethodField()
     lines = SaleLineSerializer(many=True)
     payments = PaymentSerializer(many=True)
 
     class Meta:
         model = Sale
         fields = (
-            'id', 'invoice_no', 'terminal', 'terminal_name', 'cashier_name', 'subtotal', 'discount',
-            'tax', 'total', 'change_due', 'created_at', 'lines', 'payments',
+            'id', 'invoice_no', 'terminal', 'terminal_name', 'cashier_name', 'customer', 'customer_name',
+            'is_offline', 'subtotal', 'discount', 'tax', 'total', 'returned_total', 'change_due',
+            'created_at', 'lines', 'payments',
         )
+
+    def get_returned_total(self, sale):
+        return str(sum((item.total for item in sale.returns.all()), Decimal(0)))
+
+
+class ReturnLineInputSerializer(serializers.Serializer):
+    sale_line = serializers.PrimaryKeyRelatedField(queryset=SaleLine.objects.select_related('product'))
+    quantity = serializers.DecimalField(max_digits=12, decimal_places=3, min_value=Decimal('0.001'))
+    restock = serializers.BooleanField(default=True)
+
+
+class ReturnInputSerializer(serializers.Serializer):
+    client_uuid = serializers.UUIDField()
+    sale = serializers.PrimaryKeyRelatedField(queryset=Sale.objects.all())
+    terminal = serializers.PrimaryKeyRelatedField(queryset=Terminal.objects.filter(active=True), required=False)
+    method = serializers.ChoiceField(choices=Payment.Method.choices)
+    reason = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    lines = ReturnLineInputSerializer(many=True, allow_empty=False)
+
+
+class ReturnSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SaleReturn
+        fields = ('id', 'number', 'sale', 'method', 'reason', 'total', 'tax', 'created_at')

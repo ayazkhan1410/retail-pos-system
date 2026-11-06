@@ -1,6 +1,7 @@
 from datetime import timedelta
 from decimal import Decimal
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -8,7 +9,8 @@ from rest_framework.test import APIClient
 from audit.models import AuditLog
 from auth.models import UserRole
 from auth.tests import make_user
-from inventory.models import Category, Product, StockLevel, StockMovement
+from inventory.models import Batch, Category, Product, StockLevel, StockMovement, default_branch
+from inventory.services import add_batch, move_stock
 
 
 class ProductApiTests(TestCase):
@@ -91,3 +93,71 @@ class SalePriceTests(TestCase):
         self.assertEqual(self.product(disc_percent=Decimal(10), disc_start=today + day).sale_price(), 100)
         self.assertEqual(self.product(disc_percent=Decimal(10), disc_end=today - day).sale_price(), 100)
         self.assertEqual(self.product(disc_percent=Decimal(10), disc_start=today, disc_end=today).sale_price(), 90)
+
+
+class StockOperationTests(TestCase):
+    def setUp(self):
+        self.user = make_user(UserRole.MANAGER)
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.product = Product.objects.create(name='Milk', barcode='m', category=Category.objects.first())
+        self.today = timezone.localdate()
+        branch = default_branch()
+        move_stock(self.product, branch, Decimal(10), 'opening', self.user)
+        add_batch(self.product, branch, Decimal(4), self.today + timedelta(days=5))
+        add_batch(self.product, branch, Decimal(6), self.today + timedelta(days=50))
+
+    def test_earliest_batch_sells_first_and_expiry_moves_on(self):
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.expiry_date, self.today + timedelta(days=5))
+        move_stock(self.product, default_branch(), Decimal(-5), 'sale', self.user)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.expiry_date, self.today + timedelta(days=50))
+        self.assertEqual(sorted(b.quantity for b in Batch.objects.all()), [0, 5])
+
+    def test_count_records_difference_with_reason(self):
+        response = self.client.post(f'/api/inventory/products/{self.product.pk}/adjust/', {'counted': '7', 'reason': 'count'}, format='json')
+        self.assertEqual(Decimal(response.data['stock']), 7)
+        self.assertEqual(StockMovement.objects.get(reason='count').delta, -3)
+        self.assertEqual(self.client.post(f'/api/inventory/products/{self.product.pk}/adjust/', {'counted': '-1', 'reason': 'count'}, format='json').status_code, 400)
+
+    def test_write_off_expired_lets_fresh_stock_sell(self):
+        Batch.objects.filter(quantity=4).update(expiry_date=self.today - timedelta(days=1))
+        Product.objects.filter(pk=self.product.pk).update(expiry_date=self.today - timedelta(days=1))
+        response = self.client.post(f'/api/inventory/products/{self.product.pk}/write-off-expired/')
+        self.assertEqual(Decimal(response.data['stock']), 6)
+        self.assertEqual(response.data['expiry_date'], str(self.today + timedelta(days=50)))
+        self.assertEqual(StockMovement.objects.get(reason='expired').delta, -4)
+
+    def test_stock_keeper_can_adjust_cashier_cannot(self):
+        cashier = APIClient()
+        cashier.force_authenticate(make_user())
+        self.assertEqual(cashier.post(f'/api/inventory/products/{self.product.pk}/adjust/', {'counted': '1', 'reason': 'count'}, format='json').status_code, 403)
+
+
+class ImportTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.client.force_authenticate(make_user(UserRole.MANAGER))
+
+    def upload(self, text):
+        return self.client.post('/api/inventory/products/import/', {'file': SimpleUploadedFile('p.csv', text.encode('utf-8-sig'))}, format='multipart')
+
+    def test_good_rows_load_and_bad_rows_are_reported(self):
+        response = self.upload(
+            'name,barcode,category,cost,price,stock,sales_tax_percent\n'
+            'Rice,100,grocery,80,100,5,0\n'
+            'Dup,100,grocery,80,100,5,0\n'
+            'Bad,101,grocery,80,-5,5,0\n'
+            'Tea,102,NEW CAT,80,100,,18\n'
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['created'], 2)
+        self.assertEqual([error['row'] for error in response.data['errors']], [3, 4])
+        self.assertEqual(StockLevel.objects.get(product__barcode='100').quantity, 5)
+        self.assertTrue(Category.objects.filter(name='NEW CAT').exists())
+
+    def test_rejects_missing_and_non_utf8_files(self):
+        self.assertEqual(self.client.post('/api/inventory/products/import/', {}, format='multipart').status_code, 400)
+        bad = SimpleUploadedFile('p.csv', 'نام'.encode('utf-16'))
+        self.assertEqual(self.client.post('/api/inventory/products/import/', {'file': bad}, format='multipart').status_code, 400)

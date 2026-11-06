@@ -66,6 +66,7 @@ export function mapSupplierToApi(data: SupplierFormData): Record<string, unknown
     city: data.city || null,
     ntn: data.ntn || null,
     bank_account: data.bankAccount || null,
+    // Only used on create as the opening balance; after that the ledger owns it.
     credit_balance: data.currentBalance,
     payment_type: data.paymentType,
     status: data.status,

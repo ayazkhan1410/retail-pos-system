@@ -56,69 +56,6 @@ export interface CartItem {
   quantity: number;
 }
 
-export interface GRNLine {
-  id: string;
-  alu: string;
-  productName: string;
-  cases: number;
-  qty: number;
-  free: number;
-  disc: number;
-  discPercent: number;
-  freight: number;
-  rate: number;
-  cost: number;
-  totalAmount: number;
-  totalDiscPercent: number;
-  lineTotal: number;
-  marginPercent: number;
-  retail: number;
-  expiryDate?: string;
-  previousCost?: number;
-}
-
-export interface GRNPurchase {
-  id?: string;
-  wkNo?: string;
-  poNo?: string;
-  date: string;
-  supplierId: string;
-  type: 'credit' | 'cash';
-  currentBalance?: number;
-  autoRates: boolean;
-  filterSupplierInventory: boolean;
-  lines: GRNLine[];
-  discPercent: number;
-  flatDisc: number;
-  freight: number;
-  salesTaxPercent: number;
-  expense: number;
-  disperseDiscount: boolean;
-  disperseFreight: boolean;
-  disperseSalesTax: boolean;
-  status: 'draft' | 'completed';
-}
-
-export interface PurchaseLine {
-  productId: string;
-  productName: string;
-  quantity: number;
-  unitCost: number;
-  previousCost: number;
-  newCost: number;
-}
-
-export interface Purchase {
-  id: string;
-  supplier: string;
-  lines: PurchaseLine[];
-  totalDiscount: number;
-  subtotal: number;
-  total: number;
-  createdAt: string;
-  status: 'draft' | 'completed';
-}
-
 export interface Supplier {
   id: string;
   name: string;
@@ -187,9 +124,11 @@ export interface Shift {
   sales_count: number;
 }
 
-export type PaymentMethod = 'cash' | 'jazzcash' | 'easypaisa' | 'card';
+export type PaymentMethod = 'cash' | 'jazzcash' | 'easypaisa' | 'card' | 'credit';
 
 export interface SaleLine {
+  id: number;
+  returned_quantity: string;
   name: string;
   barcode: string;
   quantity: string;
@@ -206,6 +145,10 @@ export interface Sale {
   terminal: number;
   terminal_name: string;
   cashier_name: string;
+  customer: number | null;
+  customer_name: string;
+  is_offline: boolean;
+  returned_total: string;
   subtotal: string;
   discount: string;
   tax: string;
@@ -242,4 +185,112 @@ export interface SupplierApiOption {
 export interface RoleMatrix {
   permissions: string[];
   roles: Record<string, string[]>;
+}
+
+export interface Customer {
+  id: number;
+  name: string;
+  phone: string | null;
+  address: string;
+  credit_limit: string;
+  balance: string;
+  active: boolean;
+}
+
+export interface LedgerEntry {
+  id: number;
+  delta: string;
+  kind: string;
+  method: string;
+  reference: string;
+  user_name: string;
+  created_at: string;
+}
+
+export interface Expense {
+  id: number;
+  category: string;
+  amount: string;
+  date: string;
+  method: string;
+  note: string;
+  user_name: string;
+}
+
+export interface FinancialReport {
+  invoices: number;
+  gross_sales: string;
+  returns: string;
+  discounts: string;
+  net_sales: string;
+  cost_of_goods: string;
+  gross_profit: string;
+  gross_margin_percent: string | number;
+  expenses: string;
+  net_profit: string;
+  tax_collected: string;
+  stock_value: string;
+  supplier_payable: string;
+  customer_receivable: string;
+  expenses_by_category: { category: string; amount: string }[];
+  payments: { method: string; amount: string }[];
+  by_category: { category: string; revenue: string }[];
+  by_cashier: { name: string; revenue: string; invoices: number }[];
+  top_products: { name: string; units: string; revenue: string }[];
+}
+
+export interface Insights {
+  reorder: { id: number; name: string; supplier: string; stock: string; daily_sales: string; days_left: string | null; order_quantity: string; order_cost: string }[];
+  expiry: { id: number; name: string; quantity: string; expiry_date: string; days_left: number; value_at_cost: string; suggested_markdown: number | null }[];
+  dead_stock: { id: number; name: string; stock: string; value_at_cost: string; last_sold: string | null }[];
+  staff: { name: string; sales: string; invoices: number; discounts: string; returns: string; cleared_carts: number; cash_difference: string; flags: string[] }[];
+}
+
+export interface GRNLine {
+  id?: number;
+  product: number;
+  product_name?: string;
+  barcode?: string;
+  cases: string;
+  qty: string;
+  free: string;
+  rate: string;
+  disc: string;
+  disc_percent: string;
+  freight: string;
+  retail: string;
+  expiry_date: string | null;
+  unit_cost?: string;
+  margin_percent?: string;
+  line_total?: string;
+}
+
+export interface GRN {
+  id?: number;
+  number?: string | null;
+  status?: 'draft' | 'posted';
+  supplier: number | '';
+  supplier_name?: string;
+  date: string;
+  po_no: string;
+  payment_type: 'credit' | 'cash';
+  disc_percent: string;
+  flat_disc: string;
+  freight: string;
+  sales_tax_percent: string;
+  expense: string;
+  disperse_discount: boolean;
+  disperse_freight: boolean;
+  disperse_tax: boolean;
+  subtotal?: string;
+  total?: string;
+  lines: GRNLine[];
+}
+
+export interface GRNPreview {
+  subtotal: string;
+  discount: string;
+  tax: string;
+  total: string;
+  lines: { line_total: string; unit_cost: string; margin_percent: string; previous_cost: string; warnings: string[] }[];
 }

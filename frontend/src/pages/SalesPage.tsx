@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Search, Download, Eye, Printer, Receipt } from 'lucide-react';
+import { Search, Download, Eye, Printer, Receipt, Undo2 } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
 import { Card, Button, Input, Select, Badge, Modal } from '@/components/ui';
 import { salesApi } from '@/services/endpoints';
@@ -7,6 +7,7 @@ import { useTranslation } from '@/i18n';
 import { useCan } from '@/store';
 import { formatCurrency, formatDate } from '@/utils';
 import { printReceipt } from '@/utils/receiptPrint';
+import ReturnModal from '@/components/sales/ReturnModal';
 import type { Sale, Terminal } from '@/types';
 
 const METHOD_KEYS: Record<string, string> = {
@@ -14,6 +15,7 @@ const METHOD_KEYS: Record<string, string> = {
   jazzcash: 'pos.jazzcash',
   easypaisa: 'pos.easypaisa',
   card: 'pos.cardShort',
+  credit: 'pos.onCredit',
 };
 
 function downloadCsv(sales: Sale[]) {
@@ -51,6 +53,7 @@ export default function SalesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [viewing, setViewing] = useState<Sale | null>(null);
+  const [returning, setReturning] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -197,6 +200,11 @@ export default function SalesPage() {
         footer={
           <>
             <Button variant="outline" onClick={() => setViewing(null)}>{t('common.close')}</Button>
+            {can('returns.create') && viewing && viewing.lines.some((line) => Number(line.returned_quantity) < Number(line.quantity)) && (
+              <Button variant="outline" onClick={() => setReturning(true)}>
+                <Undo2 className="h-4 w-4" /> {t('sales.returnItems')}
+              </Button>
+            )}
             <Button variant="accent" onClick={() => viewing && void printReceipt(viewing)}>
               <Printer className="h-4 w-4" /> {t('pos.printReceipt')}
             </Button>
@@ -207,11 +215,17 @@ export default function SalesPage() {
           <div className="space-y-3 text-sm">
             <p className="text-brand-500">
               {formatDate(viewing.created_at)} · {viewing.terminal_name} · {t('sales.cashier')}: {viewing.cashier_name}
+              {viewing.customer_name && ` · ${viewing.customer_name}`}
             </p>
             <div className="divide-y divide-brand-100 dark:divide-brand-800">
               {viewing.lines.map((line) => (
                 <div key={line.barcode} className="flex justify-between gap-3 py-2">
-                  <span>{line.name} <span className="text-brand-500">× {Number(line.quantity)}</span></span>
+                  <span>
+                    {line.name} <span className="text-brand-500">× {Number(line.quantity)}</span>
+                    {Number(line.returned_quantity) > 0 && (
+                      <span className="ml-2 text-xs text-amber-600">{t('sales.returnedCount', { count: Number(line.returned_quantity) })}</span>
+                    )}
+                  </span>
                   <span className="font-semibold">{formatCurrency(Number(line.line_total))}</span>
                 </div>
               ))}
@@ -224,6 +238,7 @@ export default function SalesPage() {
                 [t('sales.total'), viewing.total],
                 ...viewing.payments.map((payment) => [t(METHOD_KEYS[payment.method]), payment.amount]),
                 [t('sales.change'), viewing.change_due],
+                ...(Number(viewing.returned_total) > 0 ? [[t('sales.returnedTotal'), viewing.returned_total]] : []),
               ].map(([label, value]) => (
                 <div key={label} className="flex justify-between">
                   <dt className="text-brand-500">{label}</dt>
@@ -234,6 +249,17 @@ export default function SalesPage() {
           </div>
         )}
       </Modal>
+      {returning && viewing && (
+        <ReturnModal
+          sale={viewing}
+          onClose={() => setReturning(false)}
+          onDone={(sale) => {
+            setReturning(false);
+            setViewing(sale);
+            void load(1);
+          }}
+        />
+      )}
     </>
   );
 }

@@ -55,5 +55,26 @@ services:
       - backend
     restart: unless-stopped
 
+  # A daily backup, keeping 14 days. Copy ./backups off this machine: one disk failure would lose both.
+  backup:
+    image: postgres:16-alpine
+    env_file:
+      - .env
+    environment:
+      PGHOST: db
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./backups:/backups
+    command: >-
+      sh -c 'while true; do
+      pg_dump -U "$$POSTGRES_USER" "$$POSTGRES_DB" > "/backups/auto-$$(date +%Y%m%d-%H%M%S).sql.tmp"
+      && mv /backups/auto-*.sql.tmp "/backups/auto-$$(date +%Y%m%d-%H%M%S).sql";
+      find /backups -name "auto-*.sql" -mtime +14 -delete;
+      sleep 86400; done'
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:

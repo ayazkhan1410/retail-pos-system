@@ -30,6 +30,7 @@ const METHOD_KEYS: Record<string, string> = {
   jazzcash: 'pos.jazzcash',
   easypaisa: 'pos.easypaisa',
   card: 'pos.cardShort',
+  credit: 'pos.onCredit',
 };
 
 function EmptyChart({ text }: { text: string }) {

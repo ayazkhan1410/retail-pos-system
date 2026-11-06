@@ -140,6 +140,7 @@ export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) 
         label="Current Balance (PKR)"
         type="number"
         value={form.currentBalance}
+        disabled={!!supplier}
         onChange={(e) => handleChange('currentBalance', e.target.value)}
       />
       <Select

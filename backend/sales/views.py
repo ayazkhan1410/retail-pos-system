@@ -12,9 +12,11 @@ from rest_framework.views import APIView
 from audit.models import AuditLog
 from auth.permissions import requires
 from inventory.models import Product, StockLevel, default_branch
-from sales.models import Payment, Sale, SaleLine, Shift, Terminal
-from sales.serializers import SaleInputSerializer, SaleSerializer, ShiftSerializer, TerminalSerializer
-from sales.services import close_shift, create_sale, open_shift
+from sales.models import Payment, Sale, SaleLine, SaleReturn, Shift, Terminal
+from sales.serializers import (
+    ReturnInputSerializer, ReturnSerializer, SaleInputSerializer, SaleSerializer, ShiftSerializer, TerminalSerializer,
+)
+from sales.services import close_shift, create_return, create_sale, open_shift
 
 
 class SalePagination(PageNumberPagination):
@@ -43,7 +45,9 @@ class SaleListCreateView(APIView):
     permission_classes = [requires('sales.view', 'pos.sell')]
 
     def get(self, request):
-        queryset = Sale.objects.select_related('terminal', 'cashier').prefetch_related('lines', 'payments')
+        queryset = Sale.objects.select_related('terminal', 'cashier', 'customer').prefetch_related(
+            'lines__return_lines', 'payments', 'returns',
+        )
         filters = SaleFilterInput(data=request.query_params)
         filters.is_valid(raise_exception=True)
         params = filters.validated_data
@@ -68,6 +72,19 @@ class SaleListCreateView(APIView):
         sale, created = create_sale(request.user, serializer.validated_data)
         return Response(
             SaleSerializer(sale).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class ReturnCreateView(APIView):
+    permission_classes = [requires(write='returns.create')]
+
+    def post(self, request):
+        data = ReturnInputSerializer(data=request.data)
+        data.is_valid(raise_exception=True)
+        sale_return, created = create_return(request.user, data.validated_data)
+        return Response(
+            {'return': ReturnSerializer(sale_return).data, 'sale': SaleSerializer(sale_return.sale).data},
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
@@ -122,12 +139,13 @@ class DashboardView(APIView):
         week_start = today - timedelta(days=6)
         sales_today = Sale.objects.filter(created_at__date=today)
         totals = sales_today.aggregate(revenue=Coalesce(Sum('total'), Decimal(0)), count=Count('id'))
-        yesterday = Sale.objects.filter(created_at__date=today - timedelta(days=1)).aggregate(
+        yesterday_date = today - timedelta(days=1)
+        yesterday = Sale.objects.filter(created_at__date=yesterday_date).aggregate(
             revenue=Coalesce(Sum('total'), Decimal(0)),
-        )['revenue']
+        )['revenue'] - self._returned(yesterday_date)
 
         return Response({
-            'today_revenue': totals['revenue'],
+            'today_revenue': totals['revenue'] - self._returned(today),
             'today_count': totals['count'],
             'yesterday_revenue': yesterday,
             'open_counters': Shift.objects.filter(closed_at__isnull=True).count(),
@@ -171,6 +189,10 @@ class DashboardView(APIView):
                 .order_by('-closed_at')[:5]
             ],
         })
+
+    @staticmethod
+    def _returned(day):
+        return SaleReturn.objects.filter(created_at__date=day).aggregate(v=Coalesce(Sum('total'), Decimal(0)))['v']
 
     @staticmethod
     def _stock_counts():

@@ -45,6 +45,9 @@ class Sale(AppendOnlyModel):
     terminal = models.ForeignKey(Terminal, on_delete=models.PROTECT)
     shift = models.ForeignKey(Shift, on_delete=models.PROTECT, related_name='sales')
     cashier = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    customer = models.ForeignKey('customers.Customer', null=True, blank=True, on_delete=models.PROTECT, related_name='sales')
+    # Rung up while the server was unreachable and synced later; owners can review these.
+    is_offline = models.BooleanField(default=False)
     subtotal = models.DecimalField(max_digits=14, decimal_places=2)
     discount = models.DecimalField(max_digits=14, decimal_places=2)
     tax = models.DecimalField(max_digits=14, decimal_places=2)
@@ -79,8 +82,36 @@ class Payment(AppendOnlyModel):
         JAZZCASH = 'jazzcash', 'JazzCash'
         EASYPAISA = 'easypaisa', 'Easypaisa'
         CARD = 'card', 'Card'
+        CREDIT = 'credit', 'Customer credit'
 
     sale = models.ForeignKey(Sale, on_delete=models.PROTECT, related_name='payments')
     method = models.CharField(max_length=20, choices=Method.choices)
     amount = models.DecimalField(max_digits=14, decimal_places=2)
     reference = models.CharField(max_length=100, blank=True)
+
+
+class SaleReturn(AppendOnlyModel):
+    client_uuid = models.UUIDField(unique=True)
+    number = models.CharField(max_length=40, unique=True)
+    sale = models.ForeignKey(Sale, on_delete=models.PROTECT, related_name='returns')
+    terminal = models.ForeignKey(Terminal, on_delete=models.PROTECT)
+    # Set for cash refunds, which come out of that shift's drawer.
+    shift = models.ForeignKey(Shift, null=True, blank=True, on_delete=models.PROTECT, related_name='returns')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    method = models.CharField(max_length=20, choices=Payment.Method.choices)
+    reason = models.CharField(max_length=255, blank=True)
+    total = models.DecimalField(max_digits=14, decimal_places=2)
+    tax = models.DecimalField(max_digits=14, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-id']
+
+
+class ReturnLine(AppendOnlyModel):
+    sale_return = models.ForeignKey(SaleReturn, on_delete=models.PROTECT, related_name='lines')
+    sale_line = models.ForeignKey(SaleLine, on_delete=models.PROTECT, related_name='return_lines')
+    quantity = models.DecimalField(max_digits=12, decimal_places=3)
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    tax_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    restocked = models.BooleanField(default=True)

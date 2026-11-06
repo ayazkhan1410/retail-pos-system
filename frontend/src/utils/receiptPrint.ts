@@ -1,5 +1,5 @@
 import { inventoryApi } from '@/services/endpoints';
-import type { Sale } from '@/types';
+import type { Branch, Sale } from '@/types';
 import { escapeHtml } from './labelPrint';
 import { formatCurrency, formatDate } from './index';
 
@@ -8,6 +8,7 @@ const METHOD_LABELS: Record<string, string> = {
   jazzcash: 'JazzCash',
   easypaisa: 'Easypaisa',
   card: 'Card',
+  credit: 'On credit (khata)',
 };
 
 function row(label: string, value: string, bold = false) {
@@ -15,8 +16,20 @@ function row(label: string, value: string, bold = false) {
   return `<div class="row"><${tag}>${escapeHtml(label)}</${tag}><${tag}>${escapeHtml(value)}</${tag}></div>`;
 }
 
+const STORE_CACHE = 'smartshop-store-details';
+
+async function loadStore(): Promise<Pick<Branch, 'name' | 'address' | 'phone' | 'ntn'>> {
+  try {
+    const { data } = await inventoryApi.branch();
+    localStorage.setItem(STORE_CACHE, JSON.stringify(data));
+    return data;
+  } catch {
+    return JSON.parse(localStorage.getItem(STORE_CACHE) ?? 'null') ?? { name: 'SmartShop', address: '', phone: '', ntn: '' };
+  }
+}
+
 export async function printReceipt(sale: Sale) {
-  const { data: store } = await inventoryApi.branch();
+  const store = await loadStore();
   const lines = sale.lines.map((line) => `
     <div class="item">${escapeHtml(line.name)}</div>
     ${row(`${Number(line.quantity)} x ${formatCurrency(Number(line.unit_price))}`, formatCurrency(Number(line.line_total)))}
@@ -46,6 +59,8 @@ export async function printReceipt(sale: Sale) {
     ${row('Date', formatDate(sale.created_at))}
     ${row('Counter', sale.terminal_name)}
     ${row('Cashier', sale.cashier_name)}
+    ${sale.customer_name ? row('Customer', sale.customer_name) : ''}
+    ${sale.is_offline ? '<p class="center">Saved offline: invoice number issued on sync</p>' : ''}
     <hr/>
     ${lines}
     <hr/>

@@ -172,7 +172,12 @@ export default function POSPage() {
     if (can('customers.view')) customersApi.list().then(({ data }) => setCustomers(data)).catch(() => undefined);
     void syncPending();
     const timer = window.setInterval(() => void syncPending(), SYNC_INTERVAL_MS);
-    return () => window.clearInterval(timer);
+    const onOnline = () => void syncPending();
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('online', onOnline);
+    };
     // Runs once on opening the till.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -373,6 +378,19 @@ export default function POSPage() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [completedSale, finishSale]);
+
+  // A scanner just types, so a click elsewhere must not swallow the next scan.
+  useEffect(() => {
+    if (modalOpen) return;
+    const handler = (event: KeyboardEvent) => {
+      const typingElsewhere = (event.target as HTMLElement).closest?.('input, select, textarea');
+      if (!typingElsewhere && event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        scannerRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [modalOpen]);
 
   useKeyboardShortcut('f2', focusScanner);
   useKeyboardShortcut('f4', handleClearCart, { ctrl: true });

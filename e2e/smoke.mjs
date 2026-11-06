@@ -34,6 +34,9 @@ ok('category tab filters (was always empty)',t.includes('Basmati')&&!t.includes(
 await page.getByRole('button',{name:'All',exact:true}).click();
 ok('expired item hidden from grid',!(await page.innerText('body')).includes('Nescafe'));
 await scan('999999'); ok('unknown barcode gives message',(await page.textContent('[role=alert]')).includes('999999'));
+await page.getByRole('button',{name:'GROCERY'}).click(); await page.keyboard.type('999999'); await page.keyboard.press('Enter'); await page.waitForTimeout(150);
+ok('scan after clicking a button still reaches the till',(await page.textContent('[role=alert]')).includes('999999'));
+await page.getByRole('button',{name:'All',exact:true}).click();
 await scan('200000000103'); ok('expired scan refused',(await page.textContent('[role=alert]')).includes('expired'));
 await scan('2000000000'); ok('partial barcode adds nothing',(await page.innerText('body')).includes('Scanner ready'));
 await page.getByRole('textbox',{name:/Scan barcode/}).fill('');

@@ -7,7 +7,9 @@ import { useTranslation } from '@/i18n';
 import { ROLE_LABEL_KEYS } from '@/utils';
 import type { User, UserRole } from '@/types';
 
-const emptyForm = { email: '', full_name: '', role: 'cashier' as UserRole, password: '', is_active: true };
+const emptyForm = {
+  email: '', full_name: '', role: 'cashier' as UserRole, password: '', pin: '', is_active: true,
+};
 
 export default function StaffCard() {
   const { t } = useTranslation();
@@ -36,8 +38,10 @@ export default function StaffCard() {
     event.preventDefault();
     setSaving(true);
     setError('');
-    const { password, ...rest } = form;
-    const payload: UserInput = password ? form : rest;
+    const { password, pin, ...rest } = form;
+    const payload: UserInput = { ...rest };
+    if (password) payload.password = password;
+    if (pin) payload.pin = pin;
     try {
       if (editing) await authApi.updateUser(editing.id, payload);
       else await authApi.createUser(payload);
@@ -101,6 +105,17 @@ export default function StaffCard() {
             required={!editing}
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
+          />
+          <Input
+            id="staff-pin"
+            label={editing ? t('settings.newPin') : t('settings.pin')}
+            type="password"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={6}
+            value={form.pin}
+            onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+            placeholder={editing && users.find((u) => u.id === editing.id)?.has_pin ? t('settings.pinKeep') : t('settings.pinHint')}
           />
           <Select
             id="staff-role"

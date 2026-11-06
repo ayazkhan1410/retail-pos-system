@@ -24,7 +24,7 @@ class ProductSerializer(serializers.ModelSerializer):
     stock = serializers.DecimalField(max_digits=12, decimal_places=3, required=False, min_value=Decimal(0))
     sale_price = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     extra_barcodes = serializers.ListField(
-        child=serializers.CharField(max_length=64), required=False, allow_empty=True,
+        child=serializers.CharField(max_length=64), required=False, allow_empty=True, write_only=True,
     )
 
     class Meta:

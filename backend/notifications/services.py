@@ -37,7 +37,8 @@ def stock_dedupe_key(product_id, branch_id) -> str:
 
 
 def expiry_dedupe_key(product_id, branch_id=0) -> str:
-    return f'expiry:product:{product_id}:branch:{branch_id}'
+    # Product-level key only — branch in the key caused duplicate expiry alerts.
+    return f'expiry:product:{product_id}'
 
 
 def _recipients_for_permissions(permission_codes: tuple[str, ...]):
@@ -72,14 +73,14 @@ def notify_users(
                 if dedupe_key:
                     existing = (
                         Notification.objects.select_for_update()
-                        .filter(
-                            recipient=user,
-                            dedupe_key=dedupe_key,
-                            read_at__isnull=True,
-                        )
+                        .filter(recipient=user, dedupe_key=dedupe_key)
+                        .order_by('-id')
                         .first()
                     )
                     if existing:
+                        # Read/acknowledged alerts stay quiet until restock clears the key.
+                        if existing.read_at is not None:
+                            continue
                         existing.kind = kind
                         existing.severity = severity
                         existing.title = title
@@ -137,14 +138,15 @@ def notify_permission_holders(
 
 
 def resolve_alerts(dedupe_keys: list[str]) -> int:
-    """Mark matching unread alerts as read (e.g. after restock)."""
+    """Clear matching alerts after restock so a later dip can notify again."""
     if not dedupe_keys:
         return 0
     try:
-        return Notification.objects.filter(
-            dedupe_key__in=dedupe_keys,
-            read_at__isnull=True,
-        ).update(read_at=timezone.now())
+        # Drop dedupe_key so a later low-stock/expiry can create a fresh alert.
+        return Notification.objects.filter(dedupe_key__in=dedupe_keys).update(
+            read_at=timezone.now(),
+            dedupe_key='',
+        )
     except Exception:
         logger.exception('Failed to resolve alerts keys=%s', dedupe_keys)
         return 0

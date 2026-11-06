@@ -20,8 +20,9 @@ POLL_SECONDS = 2
 HEARTBEAT_SECONDS = 15
 # Short-lived streams: clients reconnect; sync gunicorn workers are freed quickly.
 MAX_STREAM_SECONDS = 45
-# Hard cap per process so one shop's open tabs cannot exhaust the worker pool.
-MAX_CONCURRENT_STREAMS = 20
+# Hard cap per process. Prod uses 3 gthread workers x 4 threads = 12 slots;
+# keep well under that so reconnecting tabs cannot starve request workers.
+MAX_CONCURRENT_STREAMS = 3
 _STREAM_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_STREAMS)
 
 

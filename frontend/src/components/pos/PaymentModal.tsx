@@ -17,6 +17,8 @@ export interface PaymentResult {
   discount: number;
   customer: number | null;
   payments: { method: PaymentMethod; amount: string; reference?: string }[];
+  /** Cash quick-pay: print only when cashier chooses Print. */
+  print?: boolean;
 }
 
 interface PaymentModalProps {

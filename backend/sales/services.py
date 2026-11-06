@@ -222,9 +222,8 @@ def _post_return(user, data):
         shift = Shift.objects.filter(terminal=terminal, closed_at__isnull=True).first()
         if not shift:
             _reject(f'{terminal.name} has no open shift to refund cash from.')
-    if method == Payment.Method.CREDIT:
-        if sale is None or not sale.customer_id:
-            _reject('Credit refunds need the original invoice with a customer.')
+    if method == Payment.Method.CREDIT and (sale is None or not sale.customer_id):
+        _reject('Credit refunds need the original invoice with a customer.')
 
     invoice_rows = []
     walk_in_rows = []
@@ -247,9 +246,8 @@ def _post_return(user, data):
             product = item.get('product')
             if product is None:
                 _reject('Pick a product to return.')
-            unit_price = item.get('unit_price')
-            if unit_price is None:
-                unit_price = product.sale_price()
+            # Never trust client refund price — walk-in refunds use today's catalog till price.
+            unit_price = product.sale_price()
             amount = _money(Decimal(unit_price) * item['quantity'])
             walk_in_rows.append((product, item['quantity'], item.get('restock', True), amount, Decimal(unit_price)))
 

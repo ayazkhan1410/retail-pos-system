@@ -1,8 +1,8 @@
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from auth.tests import make_user
 from auth.models import UserRole
+from auth.tests import make_user
 from inventory.models import Category, Product
 from suppliers.models import Supplier
 

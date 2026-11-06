@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, Search, Pencil, Trash2, Package, AlertTriangle, Filter, X, Printer, Scale, Upload, Ban } from 'lucide-react';
 import { Header } from '@/layouts/DashboardLayout';
 import { Card, Button, Input, Badge, StockBadge, Modal, Select } from '@/components/ui';
@@ -41,6 +42,7 @@ function ExpiryCell({ expiryDate }: { expiryDate?: string }) {
 export default function InventoryPage() {
   const { t } = useTranslation();
   const can = useCan();
+  const [searchParams] = useSearchParams();
   const { products, loading, error: loadFailed, fetchProducts, addProduct, updateProduct, deleteProduct } = useInventoryStore();
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -53,7 +55,15 @@ export default function InventoryPage() {
   useEffect(() => {
     void fetchProducts();
   }, [fetchProducts]);
-  const [filters, setFilters] = useState<InventoryFilters>(emptyInventoryFilters);
+  const [filters, setFilters] = useState<InventoryFilters>(() => {
+    const q = searchParams.get('q')?.trim() ?? '';
+    return q ? { ...emptyInventoryFilters, search: q } : emptyInventoryFilters;
+  });
+
+  useEffect(() => {
+    const q = searchParams.get('q')?.trim() ?? '';
+    if (q) setFilters((prev) => ({ ...prev, search: q }));
+  }, [searchParams]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [labelProduct, setLabelProduct] = useState<Product | null>(null);

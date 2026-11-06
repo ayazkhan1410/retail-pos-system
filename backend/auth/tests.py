@@ -110,3 +110,33 @@ class AccessTests(TestCase):
         self.client.force_authenticate(owner)
         self.assertEqual(self.client.patch(f'/api/auth/users/{owner.pk}/', {'is_active': False}, format='json').status_code, 400)
         self.assertEqual(self.client.patch(f'/api/auth/users/{owner.pk}/', {'role': 'cashier'}, format='json').status_code, 400)
+
+    def test_pin_switch_blocks_owner_escalation_and_duplicate_pins(self):
+        from django.contrib.auth.hashers import make_password
+
+        owner = make_user(UserRole.OWNER, email='owner-pin@test.local')
+        manager = make_user(UserRole.MANAGER, email='mgr-pin@test.local')
+        cashier = make_user(UserRole.CASHIER, email='cash-pin@test.local')
+        other = make_user(UserRole.CASHIER, email='cash2-pin@test.local')
+        owner.pin = make_password('9999')
+        owner.save(update_fields=['pin'])
+        manager.pin = make_password('5555')
+        manager.save(update_fields=['pin'])
+        cashier.pin = make_password('1234')
+        cashier.save(update_fields=['pin'])
+
+        self.client.force_authenticate(owner)
+        dup = self.client.patch(f'/api/auth/users/{other.pk}/', {'pin': '1234'}, format='json')
+        self.assertEqual(dup.status_code, 400, dup.data)
+
+        self.client.force_authenticate(cashier)
+        # Cannot escalate to manager or owner via PIN.
+        self.assertEqual(self.client.post('/api/auth/switch-pin/', {'pin': '5555'}, format='json').status_code, 403)
+        self.assertEqual(self.client.post('/api/auth/switch-pin/', {'pin': '9999'}, format='json').status_code, 400)
+
+        peer = make_user(UserRole.CASHIER, email='cash3-pin@test.local')
+        peer.pin = make_password('4321')
+        peer.save(update_fields=['pin'])
+        switched = self.client.post('/api/auth/switch-pin/', {'pin': '4321'}, format='json')
+        self.assertEqual(switched.status_code, 200, switched.data)
+        self.assertEqual(switched.data['user']['email'], 'cash3-pin@test.local')

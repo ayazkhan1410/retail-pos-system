@@ -125,6 +125,37 @@ class GRNTests(TestCase):
         self.assertEqual(cashier.get('/api/purchases/').status_code, 403)
         self.assertEqual(self.post(999999).status_code, 400)
 
+    def test_void_posted_grn_reverses_stock_and_supplier(self):
+        grn = self.create()
+        self.post(grn['id'])
+        self.assertEqual(StockLevel.objects.get(product=self.a).quantity, 10)
+        response = self.client.post(f"/api/purchases/{grn['id']}/void/", {'reason': 'Wrong delivery'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['status'], 'voided')
+        self.assertEqual(StockLevel.objects.get(product=self.a).quantity, 0)
+        self.supplier.refresh_from_db()
+        self.assertEqual(self.supplier.credit_balance, 0)
+        self.assertEqual(self.client.post(f"/api/purchases/{grn['id']}/void/", {}, format='json').status_code, 400)
+
+    def test_purchase_return_posts_and_reduces_stock(self):
+        grn = self.create()
+        self.post(grn['id'])
+        payload = {
+            'supplier': self.supplier.pk,
+            'grn': grn['id'],
+            'date': str(timezone.localdate()),
+            'reason': 'Damaged',
+            'lines': [{'product': self.a.pk, 'quantity': '2', 'rate': '100'}],
+        }
+        created = self.client.post('/api/purchases/returns/', payload, format='json')
+        self.assertEqual(created.status_code, 201, created.data)
+        posted = self.client.post(f"/api/purchases/returns/{created.data['id']}/post/")
+        self.assertEqual(posted.status_code, 200, posted.data)
+        self.assertTrue(posted.data['number'].startswith('PR-'))
+        self.assertEqual(StockLevel.objects.get(product=self.a).quantity, 8)
+        self.supplier.refresh_from_db()
+        self.assertEqual(self.supplier.credit_balance, 1300)
+
 
 class SupplierLedgerTests(TestCase):
     def setUp(self):

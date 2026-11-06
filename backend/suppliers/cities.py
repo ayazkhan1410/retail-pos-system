@@ -1,4 +1,4 @@
-[
+PAKISTAN_CITIES = [
     "Islamabad",
     "Ahmed Nager",
     "Ahmadpur East",

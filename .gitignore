@@ -193,3 +193,7 @@ frontend/.vite/
 
 # Local demo passwords
 .local-demo-logins.txt
+
+# E2E and demo tooling
+e2e/node_modules/
+e2e/package-lock.json

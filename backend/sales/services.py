@@ -6,9 +6,10 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from audit.models import log_event
+from customers.models import Customer, CustomerLedgerEntry, post_customer_entry
 from inventory.models import CENT, Product, StockMovement
 from inventory.services import move_stock
-from sales.models import Payment, Sale, SaleLine, Shift, Terminal
+from sales.models import Payment, ReturnLine, Sale, SaleLine, SaleReturn, Shift, Terminal
 
 
 def _money(value):
@@ -41,7 +42,11 @@ def _post_sale(user, data):
 
     # The lock also keeps invoice numbers gap-free per terminal.
     terminal = Terminal.objects.select_for_update().select_related('branch').get(pk=data['terminal'].pk)
+    offline = data.get('offline', False)
     shift = Shift.objects.filter(terminal=terminal, closed_at__isnull=True).first()
+    if not shift and offline:
+        # Already sold while disconnected: file it under the last shift rather than lose it.
+        shift = Shift.objects.filter(terminal=terminal).order_by('-id').first()
     if not shift:
         _reject(f'{terminal.name} has no open shift.')
 
@@ -52,17 +57,23 @@ def _post_sale(user, data):
         _reject('The same product appears on two lines.')
     products = Product.objects.in_bulk(product_ids)
 
-    rows = []
+    rows, price_changes = [], []
     for line in requested:
         product = products[line['product'].pk]
         quantity = line['quantity']
-        if not product.active:
-            _reject(f'{product.name} is no longer on sale.')
-        if product.is_expired:
-            _reject(f'{product.name} has expired and cannot be sold.')
+        if not offline:
+            if not product.active:
+                _reject(f'{product.name} is no longer on sale.')
+            if product.is_expired:
+                _reject(f'{product.name} has expired and cannot be sold.')
         if not product.qty_decimal and quantity != quantity.to_integral_value():
             _reject(f'{product.name} must be sold in whole units.')
-        rows.append((product, quantity, product.sale_price(), _money(product.sale_price() * quantity)))
+        price = product.sale_price()
+        if offline and line.get('unit_price') is not None and line['unit_price'] != price:
+            # The till charged its cached price. Keep what the customer really paid and flag it.
+            price_changes.append({'product': product.name, 'charged': str(line['unit_price']), 'current': str(price)})
+            price = line['unit_price']
+        rows.append((product, quantity, price, _money(price * quantity)))
 
     subtotal = sum((row[3] for row in rows), Decimal(0))
     if data['discount'] > subtotal:
@@ -77,6 +88,15 @@ def _post_sale(user, data):
     if change_due > cash:
         _reject('Only cash can be overpaid.')
 
+    credit = sum((p['amount'] for p in data['payments'] if p['method'] == Payment.Method.CREDIT), Decimal(0))
+    customer = data.get('customer')
+    if credit:
+        if not customer:
+            _reject('Choose a customer for a credit sale.')
+        customer = Customer.objects.select_for_update().get(pk=customer.pk)
+        if customer.balance + credit > customer.credit_limit:
+            _reject(f'{customer.name} would go over their credit limit of {customer.credit_limit}.')
+
     terminal.last_invoice_seq += 1
     terminal.save(update_fields=['last_invoice_seq'])
     sale = Sale.objects.create(
@@ -86,6 +106,8 @@ def _post_sale(user, data):
         terminal=terminal,
         shift=shift,
         cashier=user,
+        customer=customer,
+        is_offline=offline,
         subtotal=subtotal,
         discount=data['discount'],
         tax=0,
@@ -130,15 +152,28 @@ def _post_sale(user, data):
         Payment(sale=sale, method=p['method'], amount=p['amount'], reference=p.get('reference', ''))
         for p in data['payments']
     ])
+    if credit:
+        post_customer_entry(customer.pk, credit, CustomerLedgerEntry.Kind.SALE, user, reference=sale.invoice_no)
+    if offline:
+        now = timezone.now()
+        sold_at = min(data.get('sold_at') or now, now)
+        Sale.objects.filter(pk=sale.pk).update(created_at=sold_at)
+        sale.created_at = sold_at
+        log_event(user, 'offline_sale', sale.invoice_no, {'total': str(total), 'price_changes': price_changes})
     if data['discount']:
         log_event(user, 'sale_discount', sale.invoice_no, {'discount': str(data['discount']), 'total': str(total)})
     return sale
 
 
 def expected_cash(shift):
-    cash_in = Payment.objects.filter(sale__shift=shift, method=Payment.Method.CASH).aggregate(v=Sum('amount'))['v'] or 0
-    change = shift.sales.aggregate(v=Sum('change_due'))['v'] or 0
-    return shift.opening_cash + cash_in - change
+    def total(queryset, field):
+        return queryset.aggregate(v=Sum(field))['v'] or 0
+
+    cash_in = total(Payment.objects.filter(sale__shift=shift, method=Payment.Method.CASH), 'amount')
+    change = total(shift.sales.all(), 'change_due')
+    refunds = total(shift.returns.filter(method=Payment.Method.CASH), 'total')
+    collected = total(shift.customer_entries.filter(kind=CustomerLedgerEntry.Kind.PAYMENT, method='cash'), 'delta')
+    return shift.opening_cash + cash_in - change - refunds - collected  # collected is negative on the ledger
 
 
 def open_shift(user, terminal, opening_cash):
@@ -171,3 +206,63 @@ def close_shift(user, shift_id, counted_cash):
         'difference': str(counted_cash - shift.expected_cash),
     })
     return shift
+
+
+@transaction.atomic
+def _post_return(user, data):
+    sale = data['sale']
+    terminal = Terminal.objects.select_for_update().select_related('branch').get(pk=(data.get('terminal') or sale.terminal).pk)
+    method = data['method']
+    shift = None
+    if method == Payment.Method.CASH:
+        shift = Shift.objects.filter(terminal=terminal, closed_at__isnull=True).first()
+        if not shift:
+            _reject(f'{terminal.name} has no open shift to refund cash from.')
+    if method == Payment.Method.CREDIT and not sale.customer_id:
+        _reject('This sale has no customer to credit.')
+
+    rows = []
+    for item in sorted(data['lines'], key=lambda row: row['sale_line'].product_id):
+        line = item['sale_line']
+        if line.sale_id != sale.pk:
+            _reject('That item is not on this invoice.')
+        already = line.return_lines.aggregate(v=Sum('quantity'))['v'] or Decimal(0)
+        if item['quantity'] > line.quantity - already:
+            _reject(f'{line.name}: only {line.quantity - already:g} left to return.')
+        # Refund what was really paid for each unit, bill discount included.
+        rows.append((line, item['quantity'], item.get('restock', True),
+                     _money(line.line_total * item['quantity'] / line.quantity),
+                     _money(line.tax_amount * item['quantity'] / line.quantity)))
+    if not rows:
+        _reject('Choose at least one item to return.')
+
+    terminal.last_invoice_seq += 1
+    terminal.save(update_fields=['last_invoice_seq'])
+    total = sum((row[3] for row in rows), Decimal(0))
+    sale_return = SaleReturn.objects.create(
+        client_uuid=data['client_uuid'],
+        number=f'R-{terminal.branch.code}-{terminal.code}-{terminal.last_invoice_seq:06d}',
+        sale=sale, terminal=terminal, shift=shift, user=user, method=method, reason=data.get('reason', ''),
+        total=total, tax=sum((row[4] for row in rows), Decimal(0)),
+    )
+    for line, quantity, restock, amount, tax in rows:
+        ReturnLine.objects.create(sale_return=sale_return, sale_line=line, quantity=quantity, amount=amount, tax_amount=tax, restocked=restock)
+        if restock:
+            move_stock(line.product, terminal.branch, quantity, StockMovement.Reason.RETURN, user, sale_return.number)
+    if method == Payment.Method.CREDIT:
+        post_customer_entry(sale.customer_id, -total, CustomerLedgerEntry.Kind.RETURN, user, reference=sale_return.number)
+    log_event(user, 'sale_returned', sale.invoice_no, {'return': sale_return.number, 'total': str(total), 'method': method})
+    return sale_return
+
+
+def create_return(user, data):
+    existing = SaleReturn.objects.filter(client_uuid=data['client_uuid']).first()
+    if existing:
+        return existing, False
+    try:
+        return _post_return(user, data), True
+    except IntegrityError:
+        existing = SaleReturn.objects.filter(client_uuid=data['client_uuid']).first()
+        if existing:
+            return existing, False
+        raise

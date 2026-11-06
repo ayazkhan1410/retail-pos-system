@@ -54,6 +54,9 @@ INSTALLED_APPS = [
     'suppliers.apps.SuppliersConfig',
     'sales.apps.SalesConfig',
     'audit.apps.AuditConfig',
+    'purchases.apps.PurchasesConfig',
+    'customers.apps.CustomersConfig',
+    'finance.apps.FinanceConfig',
 ]
 
 MIDDLEWARE = [
@@ -97,7 +100,8 @@ if POSTGRES_HOST:
             'PASSWORD': os.getenv('POSTGRES_PASSWORD', ''),
             'HOST': POSTGRES_HOST,
             'PORT': os.getenv('POSTGRES_PORT', '5432'),
-            'CONN_MAX_AGE': 60,
+            # The dev server opens a thread per request, so held connections would pile up there.
+            'CONN_MAX_AGE': 0 if DEBUG else 60,
         }
     }
 else:

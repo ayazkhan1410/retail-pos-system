@@ -15,6 +15,10 @@ const PurchasesPage = lazy(() => import('@/pages/PurchasesPage'));
 const SuppliersPage = lazy(() => import('@/pages/SuppliersPage'));
 const SalesPage = lazy(() => import('@/pages/SalesPage'));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'));
+const CustomersPage = lazy(() => import('@/pages/CustomersPage'));
+const ExpensesPage = lazy(() => import('@/pages/ExpensesPage'));
+const ReportsPage = lazy(() => import('@/pages/ReportsPage'));
+const InsightsPage = lazy(() => import('@/pages/InsightsPage'));
 
 function Requires({ permission }: { permission: string }) {
   const user = useAuthStore((state) => state.user);
@@ -60,6 +64,18 @@ export default function App() {
           </Route>
           <Route element={<Requires permission="sales.view" />}>
             <Route path="/sales" element={<SalesPage />} />
+          </Route>
+          <Route element={<Requires permission="customers.view" />}>
+            <Route path="/customers" element={<CustomersPage />} />
+          </Route>
+          <Route element={<Requires permission="expenses.view" />}>
+            <Route path="/expenses" element={<ExpensesPage />} />
+          </Route>
+          <Route element={<Requires permission="reports.view" />}>
+            <Route path="/reports" element={<ReportsPage />} />
+          </Route>
+          <Route element={<Requires permission="insights.view" />}>
+            <Route path="/insights" element={<InsightsPage />} />
           </Route>
           <Route path="/settings" element={<SettingsPage />} />
         </Route>

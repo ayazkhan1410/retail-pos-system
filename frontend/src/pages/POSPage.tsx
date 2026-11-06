@@ -13,6 +13,7 @@ import {
   X,
   LogOut,
   Lock,
+  WifiOff,
   Printer,
 } from 'lucide-react';
 import { homePath, usePOSStore, useInventoryStore, useAuthStore, useCan } from '@/store';
@@ -22,15 +23,52 @@ import { formatCurrency, cn, newUuid } from '@/utils';
 import { getExpiryStatus } from '@/utils/inventoryUtils';
 import { printReceipt } from '@/utils/receiptPrint';
 import { apiErrorMessage } from '@/services';
-import { auditApi, salesApi } from '@/services/endpoints';
+import { auditApi, customersApi, salesApi } from '@/services/endpoints';
 import PaymentModal, { type PaymentResult } from '@/components/pos/PaymentModal';
 import { CloseShiftModal, OpenShiftModal, ShiftSummaryModal } from '@/components/pos/ShiftModals';
-import type { PaymentMethod, Product, Sale, Shift, Terminal } from '@/types';
+import type { CartItem, Customer, PaymentMethod, Product, Sale, Shift, Terminal } from '@/types';
 import { useTranslation } from '@/i18n';
 import LanguageToggle from '@/components/layout/LanguageToggle';
 
 const CATALOG_REFRESH_MS = 60_000;
+const SYNC_INTERVAL_MS = 20_000;
 const isExpired = (product: Product) => getExpiryStatus(product.expiryDate) === 'expired';
+
+/** The receipt for a sale the server hasn't seen yet. The real invoice number is issued on sync. */
+function offlineSale(uuid: string, counter: Terminal, cashier: string, cart: CartItem[], result: PaymentResult, subtotal: number): Sale {
+  const total = subtotal - result.discount;
+  const paid = result.payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+  return {
+    id: 0,
+    invoice_no: `OFFLINE-${uuid.slice(0, 8).toUpperCase()}`,
+    terminal: counter.id,
+    terminal_name: counter.name,
+    cashier_name: cashier,
+    customer: null,
+    customer_name: '',
+    is_offline: true,
+    returned_total: '0',
+    subtotal: subtotal.toFixed(2),
+    discount: result.discount.toFixed(2),
+    tax: '0',
+    total: total.toFixed(2),
+    change_due: Math.max(0, paid - total).toFixed(2),
+    created_at: new Date().toISOString(),
+    lines: cart.map((item, index) => ({
+      id: index,
+      returned_quantity: '0',
+      name: item.product.name,
+      barcode: item.product.barcode,
+      quantity: String(item.quantity),
+      unit_price: item.product.salePrice.toFixed(2),
+      discount: '0',
+      tax_rate: String(item.product.salesTaxPercent ?? 0),
+      tax_amount: '0',
+      line_total: (item.product.salePrice * item.quantity).toFixed(2),
+    })),
+    payments: result.payments.map((payment) => ({ ...payment, reference: payment.reference ?? '' })),
+  };
+}
 
 function beep() {
   try {
@@ -72,6 +110,9 @@ export default function POSPage() {
     removeFromCart,
     clearCart,
     syncCart,
+    pendingSales,
+    queueSale,
+    syncPending,
     cartTotal,
     cartItemCount,
   } = usePOSStore();
@@ -80,6 +121,7 @@ export default function POSPage() {
   const can = useCan();
 
   const [terminals, setTerminals] = useState<Terminal[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [shift, setShift] = useState<Shift | null>(null);
   const [shiftLoaded, setShiftLoaded] = useState(false);
   const [closingShift, setClosingShift] = useState(false);
@@ -125,6 +167,15 @@ export default function POSPage() {
     const timer = window.setInterval(() => void load(), CATALOG_REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [fetchProducts, syncCart]);
+
+  useEffect(() => {
+    if (can('customers.view')) customersApi.list().then(({ data }) => setCustomers(data)).catch(() => undefined);
+    void syncPending();
+    const timer = window.setInterval(() => void syncPending(), SYNC_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+    // Runs once on opening the till.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const refreshShift = useCallback(async (terminalId: number) => {
     const { data } = await salesApi.currentShift(terminalId);
@@ -225,22 +276,44 @@ export default function POSPage() {
     if (!activeCounter || submitting) return;
     setSubmitting(true);
     setPayError('');
-    try {
-      const { data } = await salesApi.create({
-        client_uuid: saleUuid.current,
-        terminal: activeCounter.id,
-        discount: result.discount.toFixed(2),
-        lines: cart.map((item) => ({ product: Number(item.product.id), quantity: String(item.quantity) })),
-        payments: result.payments,
-      });
+    const payload = {
+      client_uuid: saleUuid.current,
+      terminal: activeCounter.id,
+      discount: result.discount.toFixed(2),
+      customer: result.customer,
+      lines: cart.map((item) => ({ product: Number(item.product.id), quantity: String(item.quantity) })),
+      payments: result.payments,
+    };
+    const afterSale = (sale: Sale) => {
       applySale(cart.map((item) => ({ productId: item.product.id, quantity: item.quantity })));
       clearCart();
       setPayMethod(null);
-      setCompletedSale(data);
+      setCompletedSale(sale);
       setNotice(null);
+    };
+    try {
+      const { data } = await salesApi.create(payload);
+      afterSale(data);
       void refreshShift(activeCounter.id).catch(() => undefined);
     } catch (err) {
-      setPayError(apiErrorMessage(err, t('pos.saleFailed')));
+      const lostConnection = !(err as { response?: unknown }).response;
+      const usesCredit = result.payments.some((payment) => payment.method === 'credit');
+      if (lostConnection && !usesCredit) {
+        // Server unreachable: finish the sale here and send it when the connection returns.
+        queueSale({
+          ...payload,
+          offline: true,
+          sold_at: new Date().toISOString(),
+          lines: cart.map((item) => ({
+            product: Number(item.product.id),
+            quantity: String(item.quantity),
+            unit_price: item.product.salePrice.toFixed(2),
+          })),
+        });
+        afterSale(offlineSale(payload.client_uuid, activeCounter, user?.full_name ?? '', cart, result, subtotal));
+      } else {
+        setPayError(apiErrorMessage(err, t(lostConnection ? 'pos.creditNeedsConnection' : 'pos.saleFailed')));
+      }
     } finally {
       setSubmitting(false);
     }
@@ -345,6 +418,11 @@ export default function POSPage() {
         <div className="flex items-center gap-2 sm:gap-3">
           <LiveClock />
           <LanguageToggle compact />
+          {pendingSales.length > 0 && (
+            <span role="status" className="flex items-center gap-1 rounded-md bg-amber-500/20 px-2 py-1 text-xs font-semibold text-amber-200">
+              <WifiOff className="h-3.5 w-3.5" /> {t('pos.pendingSync', { count: pendingSales.length })}
+            </span>
+          )}
           {shift && (
             <>
               <span className="hidden text-xs text-brand-400 md:inline">
@@ -353,7 +431,7 @@ export default function POSPage() {
               <button
                 type="button"
                 onClick={() => setClosingShift(true)}
-                disabled={cart.length > 0}
+                disabled={cart.length > 0 || pendingSales.length > 0}
                 className="flex h-8 items-center gap-1 rounded-lg bg-white/10 px-2 text-xs font-medium text-white/80 hover:bg-white/20 disabled:opacity-40"
               >
                 <Lock className="h-3.5 w-3.5" /> <span className="hidden sm:inline">{t('pos.closeShift')}</span>
@@ -653,6 +731,7 @@ export default function POSPage() {
           total={subtotal}
           initialMethod={payMethod ?? 'cash'}
           canDiscount={can('pos.discount')}
+          customers={customers}
           submitting={submitting}
           error={payError}
           onClose={() => {

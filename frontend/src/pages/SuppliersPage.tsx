@@ -10,6 +10,7 @@ import {
 import { Header } from '@/layouts/DashboardLayout';
 import { Card, Button, Input, Badge, Modal } from '@/components/ui';
 import SupplierForm from '@/components/suppliers/SupplierForm';
+import LedgerPanel from '@/components/customers/LedgerPanel';
 import { apiErrorMessage } from '@/services';
 import { suppliersApi } from '@/services/endpoints';
 import { useTranslation } from '@/i18n';
@@ -357,6 +358,19 @@ export default function SuppliersPage() {
                 <p className="mt-1 font-medium">{item.value}</p>
               </div>
             ))}
+            <div className="sm:col-span-2">
+              <LedgerPanel
+                key={viewingSupplier.id}
+                canPay={can('suppliers.pay')}
+                methods={['cash', 'bank', 'cheque', 'jazzcash', 'easypaisa']}
+                load={() => suppliersApi.ledger(viewingSupplier.id)}
+                pay={async (data) => {
+                  const { data: updated } = await suppliersApi.pay(viewingSupplier.id, data);
+                  setViewingSupplier(mapSupplierFromApi(updated));
+                  reloadFromStart();
+                }}
+              />
+            </div>
             {viewingSupplier.notes && (
               <div className="sm:col-span-2 rounded-xl bg-brand-50 p-4 dark:bg-brand-800/30">
                 <p className="text-xs font-medium text-brand-500">{t('suppliers.notes')}</p>

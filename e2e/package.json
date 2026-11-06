@@ -1,0 +1,12 @@
+{
+  "name": "smartshop-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "smoke": "node smoke.mjs",
+    "demo": "node demo.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.49.1"
+  }
+}

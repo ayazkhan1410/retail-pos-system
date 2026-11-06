@@ -11,6 +11,10 @@ import {
   Building2,
   X,
   LogOut,
+  Users,
+  Wallet,
+  BarChart3,
+  Lightbulb,
   type LucideIcon,
 } from 'lucide-react';
 import { cn, ROLE_LABEL_KEYS } from '@/utils';
@@ -24,6 +28,10 @@ const navItems: { to: string; permission?: string; icon: LucideIcon; labelKey: s
   { to: '/suppliers', permission: 'suppliers.view', icon: Building2, labelKey: 'nav.suppliers' },
   { to: '/purchases', permission: 'purchases.view', icon: Truck, labelKey: 'nav.purchases' },
   { to: '/sales', permission: 'sales.view', icon: Receipt, labelKey: 'nav.sales' },
+  { to: '/customers', permission: 'customers.view', icon: Users, labelKey: 'nav.customers' },
+  { to: '/expenses', permission: 'expenses.view', icon: Wallet, labelKey: 'nav.expenses' },
+  { to: '/reports', permission: 'reports.view', icon: BarChart3, labelKey: 'nav.reports' },
+  { to: '/insights', permission: 'insights.view', icon: Lightbulb, labelKey: 'nav.insights' },
   { to: '/settings', icon: Settings, labelKey: 'nav.settings' },
 ];
 

@@ -4,11 +4,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from auth.permissions import requires
-from suppliers.models import Supplier
+from audit.models import log_event
+from suppliers.models import Supplier, SupplierLedgerEntry, post_supplier_entry
 from suppliers.serializers import (
     CreateSupplierSerializer, SupplierListSerializer,
     SupplierDetailSerializer, UpdateSupplierSerializer,
-    BulkDeleteSupplierSerializer,
+    BulkDeleteSupplierSerializer, SupplierLedgerSerializer, SupplierPaymentInput,
 )
 
 
@@ -117,6 +118,7 @@ class ListCreateSupplierDataView(APIView):
     def post(self, request):
         serializer = CreateSupplierSerializer(
             data=request.data,
+            context={"request": request},
         )
 
         serializer.is_valid(raise_exception=True)
@@ -250,3 +252,27 @@ class BulkDeleteSupplierDataView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class SupplierLedgerView(APIView):
+    permission_classes = [requires("suppliers.view", "suppliers.pay")]
+
+    def get(self, request, supplier_id):
+        entries = SupplierLedgerEntry.objects.filter(supplier_id=supplier_id).select_related("user")[:200]
+        return Response(SupplierLedgerSerializer(entries, many=True).data)
+
+    def post(self, request, supplier_id):
+        """Records money paid to the supplier."""
+        data = SupplierPaymentInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        supplier = Supplier.objects.filter(pk=supplier_id).first()
+        if not supplier:
+            return Response({"detail": "Supplier not found."}, status=status.HTTP_404_NOT_FOUND)
+        values = data.validated_data
+        post_supplier_entry(
+            supplier.pk, -values["amount"], SupplierLedgerEntry.Kind.PAYMENT, request.user,
+            method=values["method"], reference=values["reference"],
+        )
+        log_event(request.user, "supplier_paid", supplier.name, {"amount": str(values["amount"]), "method": values["method"]})
+        supplier.refresh_from_db()
+        return Response(SupplierDetailSerializer(supplier).data, status=status.HTTP_201_CREATED)

@@ -1,6 +1,9 @@
+from decimal import Decimal
+
+from django.db import transaction
 from rest_framework import serializers
 
-from .models import Supplier
+from .models import Supplier, SupplierLedgerEntry, post_supplier_entry
 
 
 class UniqueNameMixin:
@@ -108,6 +111,19 @@ class CreateSupplierSerializer(UniqueNameMixin, serializers.ModelSerializer):
             },
         }
 
+    def validate_credit_balance(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError("Opening balance cannot be negative.")
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        opening = validated_data.pop("credit_balance", None) or 0
+        supplier = Supplier.objects.create(**validated_data)
+        if opening:
+            post_supplier_entry(supplier.pk, opening, SupplierLedgerEntry.Kind.OPENING, self.context["request"].user)
+            supplier.refresh_from_db()
+        return supplier
 
 
 class UpdateSupplierSerializer(UniqueNameMixin, serializers.ModelSerializer):
@@ -122,7 +138,6 @@ class UpdateSupplierSerializer(UniqueNameMixin, serializers.ModelSerializer):
             "city",
             "ntn",
             "bank_account",
-            "credit_balance",
             "payment_type",
             "status",
             "notes",
@@ -140,3 +155,17 @@ class BulkDeleteSupplierSerializer(serializers.Serializer):
         required=True,
         allow_empty=False,
     )
+
+
+class SupplierPaymentInput(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
+    method = serializers.ChoiceField(choices=["cash", "bank", "cheque", "jazzcash", "easypaisa"])
+    reference = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+
+
+class SupplierLedgerSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source="user.full_name", default="", read_only=True)
+
+    class Meta:
+        model = SupplierLedgerEntry
+        fields = ("id", "delta", "kind", "method", "reference", "user_name", "created_at")

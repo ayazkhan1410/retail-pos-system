@@ -22,6 +22,8 @@ docker compose exec backend python manage.py seed_demo
 | `stock@smartshop.local` | Products, stock, purchases |
 | `accounts@smartshop.local` | Reports, expenses, payments |
 
+For a client demo, `python manage.py seed_demo --history 30` also creates 30 days of made-up sales. Never run that on a real shop's database.
+
 ## Run it in a shop
 
 1. In `.env`, set a real `DJANGO_SECRET_KEY` and `POSTGRES_PASSWORD`. The app refuses to start with the placeholder key.
@@ -40,6 +42,7 @@ Counters then open `http://<server-address>:3000`. Add cashiers under Settings >
 ```sh
 cd backend && python manage.py test   # concurrency tests only run on PostgreSQL
 cd frontend && npm run lint && npm run build
+cd e2e && npm install && BASE=http://localhost:3000 PASSWORD=<seed password> node smoke.mjs   # needs a freshly seeded database
 ```
 
 ## Backups

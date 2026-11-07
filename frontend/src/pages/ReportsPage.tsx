@@ -71,7 +71,10 @@ export default function ReportsPage() {
   const range = useMemo(() => rangeFor(period, custom), [custom, period]);
   const [pnl, setPnl] = useState<ReportPnl | null>(null);
   const [trend, setTrend] = useState<TrendRow[] | null>(null);
-  const [section, setSection] = useState<SalesSection | StockSection | TaxSection | CashiersSection | KhataSection | null>(null);
+  // Tagged with its tab: on a tab switch the first render still holds the previous tab's data,
+  // which has a different shape (Sales data has no `categories`, so the Stock tab crashed).
+  const [loaded, setLoaded] = useState<{ tab: Tab; data: SalesSection | StockSection | TaxSection | CashiersSection | KhataSection } | null>(null);
+  const section = loaded?.tab === tab ? loaded.data : null;
   const [failed, setFailed] = useState(false);
   const [printing, setPrinting] = useState(false);
 
@@ -87,7 +90,7 @@ export default function ReportsPage() {
 
   useEffect(() => {
     if (tab === 'pnl') return;
-    setSection(null);
+    setLoaded(null);
     const request = {
       sales: () => reportPagesApi.sales(range),
       stock: () => reportPagesApi.stock(),
@@ -95,7 +98,7 @@ export default function ReportsPage() {
       cashiers: () => reportPagesApi.cashiers(range),
       khata: () => reportPagesApi.khata(),
     }[tab];
-    request().then(({ data }) => setSection(data)).catch(() => setFailed(true));
+    request().then(({ data }) => setLoaded({ tab, data })).catch(() => setFailed(true));
   }, [range, tab]);
 
   const chooseTab = (next: Tab) => {

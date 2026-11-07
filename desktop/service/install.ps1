@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory)][string]$InstallDir
 )
 $ErrorActionPreference = 'Stop'
+$env:PSModulePath = $PSHOME + '\Modules;' + $env:SystemRoot + '\System32\WindowsPowerShell\v1.0\Modules'
 $name = 'TijoriRuntime'
 $root = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'Tijori'
 $admins = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
@@ -34,7 +35,12 @@ function Set-PrivateAcl([string]$Path, [bool]$Directory, $ServiceRights) {
     if ($ServiceRights) {
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($identity,$ServiceRights,$inherit,'None','Allow'))
     }
-    Set-Acl -LiteralPath $Path -AclObject $acl
+    $item = Get-Item -LiteralPath $Path -Force
+    if ($PSVersionTable.PSEdition -eq 'Core') {
+        [IO.FileSystemAclExtensions]::SetAccessControl($item, $acl)
+    } else {
+        $item.SetAccessControl($acl)
+    }
 }
 function New-Secret {
     $bytes = New-Object byte[] 48
@@ -83,7 +89,8 @@ Invoke-SC @('failure',$name,'reset=','86400','actions=','restart/5000/restart/15
 
 if (Test-Path -LiteralPath $root) {
     Assert-RealPath $root
-    $owner = (Get-Acl -LiteralPath $root).GetOwner([Security.Principal.SecurityIdentifier])
+    $existingAcl = [Security.AccessControl.DirectorySecurity]::new($root,[Security.AccessControl.AccessControlSections]::Owner)
+    $owner = $existingAcl.GetOwner([Security.Principal.SecurityIdentifier])
     if ($owner -notin @($admins,$system)) { throw 'Existing Tijori data directory has an unexpected owner.' }
 } else {
     [IO.Directory]::CreateDirectory($root) | Out-Null

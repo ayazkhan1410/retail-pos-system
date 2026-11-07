@@ -271,8 +271,15 @@ function BackupsPanel() {
     setMessage('');
     try {
       const { data } = await systemApi.backupDatabase();
-      setMessage(t('settings.backupSuccess', { file: data.filename ?? '', size: formatBytes(data.size_bytes ?? 0) }));
-      if (window.smartshop?.openBackupsFolder) await window.smartshop.openBackupsFolder();
+      const saved = t('settings.backupSuccess', { file: data.filename ?? '', size: formatBytes(data.size_bytes ?? 0) });
+      setMessage(saved);
+      if (window.smartshop?.openBackupsFolder) {
+        try {
+          await window.smartshop.openBackupsFolder();
+        } catch {
+          setMessage(`${saved} ${t('settings.backupFolderAccess')}`);
+        }
+      }
     } catch (err) {
       setMessage(apiErrorMessage(err, t('settings.backupFailed')));
     } finally {

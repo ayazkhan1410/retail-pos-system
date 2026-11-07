@@ -778,6 +778,7 @@ export const en = {
     version: 'Version',
     backupDatabase: 'Backup Database',
     backupSuccess: 'Backup saved: {{file}} ({{size}})',
+    backupFolderAccess: 'A Windows administrator can open the backups folder on the main computer.',
     backupFailed: 'The backup could not be saved. Check the main computer and its available disk space.',
   },
   notifications: {

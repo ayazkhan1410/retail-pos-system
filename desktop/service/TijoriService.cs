@@ -30,24 +30,42 @@ internal sealed class TijoriService : ServiceBase {
 
     static void Main(string[] args) {
         if (args.Length == 1 && args[0] == "--client") {
+            string stage = "opening redirected input and output";
             try {
-                Console.InputEncoding = Utf8;
-                Console.OutputEncoding = Utf8;
+                using (var input = ParentStream(-10, FileAccess.Read))
+                using (var output = ParentStream(-11, FileAccess.Write))
                 using (var client = new NamedPipeClientStream(".", PipeName, PipeAccessRights.ReadWrite,
                            PipeOptions.None, TokenImpersonationLevel.Identification, HandleInheritability.None)) {
+                    stage = "connecting to the shop service";
                     client.Connect(15000);
+                    stage = "verifying the shop service";
                     uint pid;
                     if (!GetNamedPipeServerProcessId(client.SafePipeHandle, out pid) || pid != ServicePid())
                         throw new IOException("Tijori could not verify the local Windows service.");
-                    string request = ReadLine(Console.OpenStandardInput(), MaxRequest);
+                    stage = "exchanging the service request";
+                    string request = ReadLine(input, MaxRequest);
                     WriteLine(client, request);
-                    Console.WriteLine(ReadLine(client, MaxRequest));
+                    WriteLine(output, ReadLine(client, MaxRequest));
                 }
-            } catch (Exception ex) { Console.Error.WriteLine(ex.Message); Environment.ExitCode = 1; }
+            } catch (Exception ex) {
+                Environment.ExitCode = 1;
+                try {
+                    using (var error = ParentStream(-12, FileAccess.Write))
+                        WriteLine(error, "Tijori failed while " + stage + ": " + ex.Message);
+                } catch (IOException) { } // The parent may already have closed stderr.
+            }
             return;
         }
         Run(new TijoriService());
     }
+
+    // A hidden Windows executable inherits ordinary pipes. Console encoding APIs require a console.
+    static Stream ParentStream(int standardHandle, FileAccess access) {
+        var handle = new SafeFileHandle(GetStdHandle(standardHandle), false);
+        if (handle.IsInvalid) throw new IOException("The parent did not supply a valid redirected stream.");
+        return new FileStream(handle, access);
+    }
+    [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int standardHandle);
 
     protected override void OnStart(string[] args) {
         root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Tijori");
@@ -153,17 +171,23 @@ internal sealed class TijoriService : ServiceBase {
         byte[] data = Utf8.GetBytes(value + "\n");
         stream.Write(data, 0, data.Length); stream.Flush();
     }
-    protected override void OnShutdown() { OnStop(); }
+    protected override void OnShutdown() { StopWorker(); }
     protected override void OnStop() {
+        try { RequestAdditionalTime(120000); }
+        finally { StopWorker(); }
+    }
+    void StopWorker() {
         stopping = true;
         if (pipe != null) pipe.Dispose();
-        RequestAdditionalTime(120000);
         lock (sync) {
-            if (worker != null && !worker.HasExited) {
-                worker.StandardInput.Close();
-                worker.WaitForExit(90000);
+            try {
+                if (worker != null && !worker.HasExited) {
+                    worker.StandardInput.Close();
+                    worker.WaitForExit(90000);
+                }
+            } finally {
+                if (job != IntPtr.Zero) { CloseHandle(job); job = IntPtr.Zero; }
             }
-            if (job != IntPtr.Zero) { CloseHandle(job); job = IntPtr.Zero; }
         }
     }
 

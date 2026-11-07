@@ -779,6 +779,7 @@ export const ur: TranslationKeys = {
     version: 'ورژن',
     backupDatabase: 'ڈیٹابیس بیک اپ',
     backupSuccess: 'بیک اپ محفوظ: {{file}} ({{size}})',
+    backupFolderAccess: 'ونڈوز ایڈمنسٹریٹر مرکزی کمپیوٹر پر بیک اپ کا فولڈر کھول سکتا ہے۔',
     backupFailed: 'بیک اپ محفوظ نہیں ہو سکا۔ مرکزی کمپیوٹر پر دستیاب جگہ چیک کریں۔',
   },
   notifications: {

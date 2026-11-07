@@ -5,6 +5,9 @@ param(
     [string] $RegisteredDir
 )
 $ErrorActionPreference = "Stop"
+# NSIS can inherit a PowerShell 7 module path when launched by a developer or CI.
+# The elevated helper runs in Windows PowerShell and must use its own inbox modules.
+$env:PSModulePath = $PSHOME + '\Modules;' + $env:SystemRoot + '\System32\WindowsPowerShell\v1.0\Modules'
 
 function Test-ReparsePoint([string] $Name) {
     $item = Get-Item -Force -LiteralPath $Name -ErrorAction Stop
@@ -13,7 +16,12 @@ function Test-ReparsePoint([string] $Name) {
 
 function Assert-ProtectedItem([IO.FileSystemInfo] $Item) {
     if ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Installation path includes a link: $($Item.FullName)" }
-    $acl = Get-Acl -LiteralPath $Item.FullName -ErrorAction Stop
+    $sections = [Security.AccessControl.AccessControlSections]'Owner,Access'
+    if ($Item.PSIsContainer) {
+        $acl = [Security.AccessControl.DirectorySecurity]::new($Item.FullName, $sections)
+    } else {
+        $acl = [Security.AccessControl.FileSecurity]::new($Item.FullName, $sections)
+    }
     $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
     if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trusted) {
         throw "Installation path has a non-administrative owner: $($Item.FullName)"

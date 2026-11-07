@@ -22,7 +22,11 @@
       InitPluginsDir
       SetOutPath "$PLUGINSDIR"
       File "/oname=maintenance.ps1" "${BUILD_RESOURCES_DIR}\..\installer\maintenance.ps1"
-      !insertmacro tijoriRun "$PLUGINSDIR\maintenance.ps1" '-Action CheckLocation -InstallDir "$INSTDIR"'
+      !insertmacro tijoriRun "$PLUGINSDIR\maintenance.ps1" '-Action CheckLocation -InstallDir "$INSTDIR" -RegisteredDir "$perMachineInstallationFolder"'
+      ${IfNot} ${isUpdated}
+      ${AndIf} $perMachineInstallationFolder != ""
+        !insertmacro tijoriRun "$PLUGINSDIR\maintenance.ps1" '-Action BeforeUpgrade -InstallDir "$perMachineInstallationFolder"'
+      ${EndIf}
     SectionEnd
   !else
     ; Executes after the user starts the uninstall, before electron-builder moves or removes files.
@@ -30,6 +34,7 @@
       InitPluginsDir
       SetOutPath "$PLUGINSDIR"
       File "/oname=maintenance.ps1" "${BUILD_RESOURCES_DIR}\..\installer\maintenance.ps1"
+      !insertmacro tijoriRun "$PLUGINSDIR\maintenance.ps1" '-Action CheckInstalled -InstallDir "$INSTDIR"'
       !insertmacro tijoriRun "$INSTDIR\resources\service\install.ps1" '-Mode Uninstall -InstallDir "$INSTDIR"'
       !insertmacro tijoriRun "$PLUGINSDIR\maintenance.ps1" "-Action CloseFirewall"
     SectionEnd
@@ -37,6 +42,7 @@
 !macroend
 
 !macro customInstall
+  !insertmacro tijoriRun "$PLUGINSDIR\maintenance.ps1" '-Action CheckInstalled -InstallDir "$INSTDIR"'
   !insertmacro tijoriRun "$INSTDIR\resources\service\install.ps1" '-Mode Install -InstallDir "$INSTDIR"'
   !insertmacro tijoriRun "$PLUGINSDIR\maintenance.ps1" '-Action OpenFirewall -InstallDir "$INSTDIR"'
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "Tijori POS" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}"'

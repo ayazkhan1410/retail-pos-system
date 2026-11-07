@@ -2,6 +2,8 @@
 
 Single-shop barcode point of sale for Pakistani retail (Rs). Django + PostgreSQL API, React till UI, English / Urdu.
 
+For the packaged Windows installer, first-run setup and physical-PC test procedure, see the [Windows installer guide](docs/WINDOWS-INSTALLER.md).
+
 ## Features
 
 - **POS** — barcode scan, cash / JazzCash / Easypaisa / Raast / card / khata (payment method labels only), shifts, receipts, offline sync

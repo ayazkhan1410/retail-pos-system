@@ -1,5 +1,6 @@
 """Local Windows service worker. All mutable paths and credentials come from the installer."""
 
+import contextlib
 import io
 import json
 import logging
@@ -199,6 +200,7 @@ class ShopRuntime:
         if self.state.get('schemaVersion') != self.version:
             if not self.state.get('consent'):
                 raise RuntimeError('This database has no recorded setup consent.')
+            self.backup('update')
             self.command('migrate', interactive=False, verbosity=0)
             self.save(schemaVersion=self.version)
         if self.server and self.server.poll() is None:
@@ -247,6 +249,12 @@ class ShopRuntime:
             self.owns_pg = False
         return True
 
+    def backup(self, kind):
+        from smartshop_pos.services.backup import create_database_backup
+
+        self.django()
+        return create_database_backup(kind=kind)
+
     def dispatch(self, req):
         action = req.get('action')
         if action == 'inspect':
@@ -269,6 +277,14 @@ class ShopRuntime:
             return self.start()
         if action == 'stop':
             return self.stop()
+        if action == 'beforeUpdate' and self.state.get('shop'):
+            self.stop_server()
+            try:
+                self.ensure_database()
+                return self.backup('update')
+            except Exception:
+                self.start()
+                raise
         raise ValueError('Unsupported service operation.')
 
 
@@ -276,6 +292,30 @@ def worker():
     from django.core.management.base import CommandError
 
     runtime = ShopRuntime()
+    done = threading.Event()
+
+    def maintenance():
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        while not done.wait(60):
+            with runtime.lock:
+                today = datetime.now(ZoneInfo('Asia/Karachi')).date().isoformat()
+                if not runtime.state.get('shop') or runtime.state.get('backupDay') == today:
+                    continue
+                was_running = runtime.owns_pg
+                try:
+                    runtime.ensure_database()
+                    runtime.backup('daily')
+                    runtime.save(backupDay=today)
+                except Exception:
+                    LOG.exception('Daily shop backup failed')
+                finally:
+                    if not was_running:
+                        with contextlib.suppress(Exception):
+                            runtime.stop()
+
+    threading.Thread(target=maintenance, daemon=True).start()
     try:
         for raw in sys.stdin.buffer:
             try:
@@ -289,5 +329,6 @@ def worker():
                 reply = {'ok': False, 'error': 'Tijori could not complete the operation. Check the service log.'}
             print(json.dumps(reply, ensure_ascii=True), flush=True)
     finally:
+        done.set()
         with runtime.lock:
             runtime.stop()

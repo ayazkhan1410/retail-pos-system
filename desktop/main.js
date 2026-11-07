@@ -1,5 +1,6 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, shell } = require('electron');
 const fs = require('node:fs/promises');
+const os = require('node:os');
 const path = require('node:path');
 const { ShopService } = require('./runtime/service');
 const { openSetupWizard, readConfig } = require('./setup/wizard');
@@ -11,6 +12,7 @@ let backups;
 let origin;
 let finishing = false;
 let stopping = false;
+let updates;
 
 async function showRegister(url, config) {
   origin = new URL(url).origin;
@@ -34,6 +36,7 @@ async function showRegister(url, config) {
     if (config?.language) target.searchParams.set('setupLanguage', config.language);
     await register.loadURL(target.href);
     register.show();
+    if (service) configureUpdates();
   } catch (error) {
     register.destroy();
     throw error;
@@ -67,6 +70,34 @@ async function run() {
   if (!config) app.quit();
 }
 
+function configureUpdates() {
+  if (updates) return;
+  const { installUpdateChecks } = require('./runtime/updates');
+  updates = installUpdateChecks({
+    app, dialog, window: register, runtime: service,
+    beforeInstall: async () => { await service.stop(); finishing = true; },
+    afterFailedInstall: async () => { finishing = false; },
+  });
+  Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: 'Tijori', submenu: [
+    { label: 'Connect another counter', click: async () => {
+      const port = new URL(origin).port;
+      const urls = Object.values(os.networkInterfaces()).flat().filter(item => item && item.family === 'IPv4' && !item.internal)
+        .map(item => 'http://' + item.address + ':' + port);
+      const { response } = await dialog.showMessageBox(register, {
+        title: 'Tijori POS', message: 'Connect another counter',
+        detail: urls.length ? 'Open a shop-network address in Chrome on the other till.\n\n' + urls.join('\n')
+          : 'Connect this computer to the shop network first.',
+        buttons: urls.length ? ['Copy addresses', 'Close'] : ['Close'],
+      });
+      if (urls.length && response === 0) clipboard.writeText(urls.join('\n'));
+    } },
+    { label: 'Check for updates', click: async () => { await updates.check(); await updates.offerInstall(); } },
+    { type: 'separator' }, { role: 'quit' },
+  ] }]));
+  register.setAutoHideMenuBar(false);
+  register.setMenuBarVisibility(true);
+}
+
 ipcMain.handle('open-backups-folder', async event => {
   if (!register || event.sender !== register.webContents ||
       event.senderFrame !== register.webContents.mainFrame || new URL(event.senderFrame.url).origin !== origin) {
@@ -89,9 +120,11 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => app.quit());
   app.on('before-quit', event => {
     if (finishing || !service) return;
+    if (updates?.blocksQuit()) { event.preventDefault(); return; }
     event.preventDefault();
     if (stopping) return;
     stopping = true;
+    updates?.dispose();
     service.stop().catch(error => dialog.showErrorBox('Tijori POS', error.message)).finally(() => {
       finishing = true;
       app.quit();

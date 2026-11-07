@@ -31,6 +31,10 @@ def _settings(argv):
 
 
 def main(argv=None):
+    if (sys.argv[1:] if argv is None else argv) == ['--desktop-worker']:
+        from smartshop_pos.desktop_runtime import worker
+
+        return worker()
     args = _settings(sys.argv[1:] if argv is None else argv)
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'smartshop_pos.settings')
     import django

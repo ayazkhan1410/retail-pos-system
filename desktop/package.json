@@ -5,43 +5,50 @@
   "main": "main.js",
   "private": true,
   "author": "Tijori",
+  "repository": "github:ayazkhan1410/retail-pos-system",
   "scripts": {
-    "postinstall": "node scripts/install-electron.js",
-    "install:electron": "node scripts/install-electron.js",
+    "install:electron": "node node_modules/electron/install.js",
     "start": "node scripts/start-electron.js",
     "dev": "node scripts/start-electron.js",
-    "dist:win": "electron-builder --win nsis --x64",
-    "dist:win:dir": "electron-builder --win dir --x64"
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "dist:win:dir": "electron-builder --win dir --x64 --publish never"
   },
   "build": {
     "appId": "pk.tijori.pos",
     "productName": "Tijori POS",
-    "directories": {
-      "output": "dist"
-    },
-    "files": [
-      "main.js",
-      "preload.js",
-      "loading.html",
-      "scripts/**/*",
-      "package.json"
+    "directories": { "output": "dist" },
+    "beforePack": "./scripts/check-resources.js",
+    "files": ["*.js", "*.html", "runtime/**/*.js", "setup/**/*", "package.json"],
+    "extraResources": [
+      { "from": "build/server", "to": "server" },
+      { "from": "build/postgres", "to": "postgres" },
+      { "from": "../frontend/dist", "to": "frontend", "filter": ["**/*", "!**/*.map"] },
+      { "from": "service", "to": "service", "filter": ["install.ps1", "TijoriService.exe"] }
     ],
-    "extraResources": [],
+    "publish": { "provider": "github", "owner": "ayazkhan1410", "repo": "retail-pos-system" },
     "win": {
-      "target": [
-        "nsis"
-      ],
-      "artifactName": "Tijori-POS-Setup-${version}.${ext}"
+      "icon": "../frontend/public/icon-512.png",
+      "target": ["nsis"],
+      "artifactName": "Tijori-POS-Setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": true,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "Tijori POS",
+      "deleteAppDataOnUninstall": false,
+      "include": "installer/installer.nsh",
+      "license": "installer/LICENSE.txt"
     }
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "5.3.0",
+    "electron-updater": "6.8.12"
   },
   "devDependencies": {
     "electron": "^33.2.1",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "25.1.8"
   }
 }

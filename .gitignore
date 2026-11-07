@@ -186,6 +186,7 @@ backups/*
 
 # Desktop
 desktop/node_modules/
+desktop/service/TijoriService.exe
 
 # Frontend build caches
 frontend/.vite/

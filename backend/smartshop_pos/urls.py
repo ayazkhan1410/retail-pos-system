@@ -1,5 +1,6 @@
+from django.conf import settings
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
 
 from smartshop_pos.system_views import AppVersionView, DatabaseBackupView
 from smartshop_pos.views import HealthCheckView
@@ -23,3 +24,11 @@ urlpatterns = [
     path('api/system/version/', AppVersionView.as_view()),
     path('api/system/backup/', DatabaseBackupView.as_view()),
 ]
+
+if settings.TIJORI_FRONTEND_DIR:
+    from smartshop_pos.desktop_views import desktop_file
+
+    urlpatterns += [
+        path('static/<path:asset>', desktop_file, {'static': True}),
+        re_path(r'^(?!api(?:/|$)|admin(?:/|$)|static(?:/|$))(?P<asset>.*)$', desktop_file),
+    ]

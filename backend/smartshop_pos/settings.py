@@ -127,6 +127,9 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = 'static/'
+TIJORI_FRONTEND_DIR = os.getenv('TIJORI_FRONTEND_DIR', '')
+TIJORI_STATIC_DIR = os.getenv('TIJORI_STATIC_DIR', str(BASE_DIR / 'staticfiles'))
+STATIC_ROOT = TIJORI_STATIC_DIR
 
 AUTH_USER_MODEL = 'custom_auth.CustomUser'
 

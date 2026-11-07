@@ -7,7 +7,7 @@ import re
 from decimal import Decimal
 
 from django.conf import settings
-from django.db.models import DecimalField, OuterRef, Subquery, Value
+from django.db.models import Case, DecimalField, IntegerField, OuterRef, Q, Subquery, Value, When
 from django.db.models.functions import Coalesce
 from rest_framework.exceptions import APIException
 
@@ -163,13 +163,55 @@ def _contains_pattern(value: str) -> str:
     return f'*{_WILDCARD_META.sub(r"\\\1", value)}*'
 
 
-def search_product_ids(query: str, *, include_inactive: bool = False, limit: int = MAX_RESULTS) -> list[int]:
-    """Ranked product primary keys from Elasticsearch. Raises SearchUnavailable if ES is down."""
+def database_search_ids(query: str, *, include_inactive: bool = False, limit: int = MAX_RESULTS) -> list[int]:
+    """Ranked product ids straight from the database, for installs without Elasticsearch (single-shop PCs).
+
+    Same priorities as the till: exact barcode, barcode prefix, name prefix, then anywhere in
+    name, barcode, extra barcodes, brand or category."""
     q = (query or '').strip()
     if not q:
         return []
-    client = get_client()
-    ensure_index(client)
+    products = Product.objects.all() if include_inactive else Product.objects.filter(active=True)
+    extra = ProductBarcode.objects.filter(barcode__icontains=q).values('product_id')
+    matches = products.filter(
+        Q(name__icontains=q) | Q(barcode__icontains=q) | Q(brand__icontains=q)
+        | Q(category__name__icontains=q) | Q(pk__in=extra),
+    )
+    exact_extra = ProductBarcode.objects.filter(barcode__iexact=q).values('product_id')
+    ranked = matches.annotate(rank=Case(
+        When(Q(barcode__iexact=q) | Q(pk__in=exact_extra), then=Value(0)),
+        When(barcode__istartswith=q, then=Value(1)),
+        When(name__istartswith=q, then=Value(2)),
+        When(name__icontains=q, then=Value(3)),
+        default=Value(4),
+        output_field=IntegerField(),
+    )).order_by('rank', 'name', 'pk')
+    return list(ranked.values_list('pk', flat=True)[:min(max(limit, 1), MAX_RESULTS)])
+
+
+def search_product_ids(query: str, *, include_inactive: bool = False, limit: int = MAX_RESULTS) -> list[int]:
+    """Ranked product ids. Elasticsearch when configured, otherwise (or if it fails) the database."""
+    q = (query or '').strip()
+    if not q:
+        return []
+    if not es_enabled():
+        return database_search_ids(q, include_inactive=include_inactive, limit=limit)
+    try:
+        return _elasticsearch_ids(q, include_inactive=include_inactive, limit=limit)
+    except SearchUnavailable:
+        # A till mid-sale needs an answer; the database is slower to rank but always there.
+        logger.warning('Elasticsearch unavailable; product search fell back to the database')
+        return database_search_ids(q, include_inactive=include_inactive, limit=limit)
+
+
+def _elasticsearch_ids(q: str, *, include_inactive: bool, limit: int) -> list[int]:
+    try:
+        client = get_client()
+        ensure_index(client)
+    except SearchUnavailable:
+        raise
+    except Exception as exc:
+        raise SearchUnavailable() from exc
     must_not = [] if include_inactive else [{'term': {'active': False}}]
     contains = _contains_pattern(q)
     # Shop tills expect substring search (like the old client filter), not only whole-token matches.

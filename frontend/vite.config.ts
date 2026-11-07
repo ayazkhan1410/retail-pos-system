@@ -9,6 +9,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  build: {
+    // Never ship source maps: they would hand the readable source to anyone with the installed app.
+    sourcemap: false,
+  },
   server: {
     port: 5173,
     host: true,

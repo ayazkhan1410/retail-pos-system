@@ -40,6 +40,7 @@ function New-CounterProcess([string]$Exe, [string]$Arguments) {
 
 function Invoke-Bridge([string]$Action, [hashtable]$Fields = @{}, [switch]$ExpectRejection) {
     $request = @{action = $Action} + $Fields
+    Write-Host "Testing the installed service operation '$Action' as a standard counter user."
     $start = New-CounterProcess $client '--client'
     $start.RedirectStandardInput = $true
     $start.RedirectStandardOutput = $true
@@ -57,7 +58,10 @@ function Invoke-Bridge([string]$Action, [hashtable]$Fields = @{}, [switch]$Expec
             throw "Timed out waiting for the installed service operation '$Action'."
         }
         if ($process.ExitCode -ne 0) { throw "The standard counter account could not use the installed service bridge for '$Action'. $($stderr.GetAwaiter().GetResult())" }
-        $reply = $stdout.GetAwaiter().GetResult() | ConvertFrom-Json
+        $response = $stdout.GetAwaiter().GetResult()
+        try { $reply = ConvertFrom-Json -InputObject $response } catch {
+            throw "The installed service returned invalid JSON for '$Action' ($($response.Length) characters). $($_.Exception.Message)"
+        }
         if ($reply.ok -ne !$ExpectRejection.IsPresent) {
             throw "Unexpected result for the installed service operation '$Action'. $($reply.error) $($reply.userMessage)"
         }
@@ -162,6 +166,12 @@ try {
     $status = Invoke-Bridge 'status'
     if (!$created.ok -or !$status.configured -or $status.owner_email -ne $email -or $status.store -ne $fields.storeName -or $status.counters -ne 1) {
         throw 'The packaged shop setup did not provision the requested store.'
+    }
+    for ($attempt = 0; $attempt -lt 8; $attempt++) {
+        $again = Invoke-Bridge 'status'
+        if (!$again.ok -or $again.owner_email -ne $email -or $again.store -ne $fields.storeName -or $again.counters -ne 1) {
+            throw 'The standard counter received an incomplete store status.'
+        }
     }
     $config = Invoke-Bridge 'start'
     $base = "http://127.0.0.1:$($config.port)"

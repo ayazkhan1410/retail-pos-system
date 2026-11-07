@@ -1,75 +1,82 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Search, Download, Printer, Receipt, Undo2, X } from 'lucide-react';
-import { Header } from '@/layouts/DashboardLayout';
-import { Card, Button, Input, Select, Badge, EmptyState, StatStrip } from '@/components/ui';
-import { useInfiniteScroll } from '@/hooks/useInfiniteScroll';
-import { salesApi } from '@/services/endpoints';
-import { useTranslation } from '@/i18n';
-import { useCan } from '@/store';
-import { cn, formatCurrency, formatDate } from '@/utils';
-import { printReceipt } from '@/utils/receiptPrint';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Download, Receipt } from 'lucide-react';
+import PageShell from '@/components/layout/PageShell';
+import { Button, EmptyState, ErrorState, SkeletonRows, toast } from '@/components/ui';
+import { Avatar, Delta, FilterSelect, KpiStrip, PageHeading, Pager, Pill, SearchField } from '@/components/ui/Kit';
 import ReturnModal from '@/components/sales/ReturnModal';
 import WalkInReturnModal from '@/components/sales/WalkInReturnModal';
+import { salesApi } from '@/services/endpoints';
+import { ordersApi } from '@/services/pages';
+import { useTranslation } from '@/i18n';
+import { useCan } from '@/store';
 import type { Sale, Terminal } from '@/types';
+import type { OrderStatus, OrdersSummary } from '@/types/pages';
+import { clockTime, cn, formatCurrency, localDate, num, shortDate } from '@/utils';
+import { printReceipt } from '@/utils/receiptPrint';
 
-const METHOD_KEYS: Record<string, string> = {
-  cash: 'pos.cash',
-  jazzcash: 'pos.jazzcash',
-  easypaisa: 'pos.easypaisa',
-  raast: 'pos.raast',
-  card: 'pos.cardShort',
-  credit: 'pos.onCredit',
-};
+const PAGE_SIZE = 10;
+const EXPORT_PAGE = 200;
+const EXPORT_MAX = 2000;
+type Range = 'today' | 'yesterday' | '7d' | '30d' | 'month';
 
-function saleStatus(sale: Sale, t: (key: string) => string) {
-  const returned = Number(sale.returned_total);
-  const total = Number(sale.total);
-  if (returned > 0 && returned >= total) return { label: t('sales.statusReturned'), variant: 'danger' as const };
-  if (returned > 0) return { label: t('sales.statusPartReturned'), variant: 'warning' as const };
-  if (sale.is_offline) return { label: t('sales.statusOffline'), variant: 'info' as const };
-  if (sale.payments.some((p) => p.method === 'credit')) return { label: t('sales.statusKhata'), variant: 'warning' as const };
-  return { label: t('sales.statusPaid'), variant: 'success' as const };
+function rangeDates(range: Range): { from: string; to: string } {
+  const today = new Date();
+  const back = (days: number) => {
+    const day = new Date(today);
+    day.setDate(day.getDate() - days);
+    return localDate(day);
+  };
+  switch (range) {
+    case 'today': return { from: localDate(today), to: localDate(today) };
+    case 'yesterday': return { from: back(1), to: back(1) };
+    case '7d': return { from: back(6), to: localDate(today) };
+    case '30d': return { from: back(29), to: localDate(today) };
+    case 'month': return { from: localDate(new Date(today.getFullYear(), today.getMonth(), 1)), to: localDate(today) };
+  }
 }
 
-function downloadCsv(sales: Sale[]) {
-  const header = ['Invoice', 'Counter', 'Cashier', 'Date', 'Items', 'Subtotal', 'Discount', 'Tax', 'Total', 'Payment'];
-  const rows = sales.map((sale) => [
-    sale.invoice_no, sale.terminal_name, sale.cashier_name, sale.created_at, sale.lines.length,
-    sale.subtotal, sale.discount, sale.tax, sale.total, sale.payments.map((p) => p.method).join(' + '),
-  ]);
-  const cell = (value: string | number) => {
-    const text = String(value);
-    return `"${(/^[=+@-]/.test(text) ? `'${text}` : text).replace(/"/g, '""')}"`;
-  };
-  const csv = [header, ...rows].map((row) => row.map(cell).join(',')).join('\n');
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  link.download = 'orders.csv';
-  link.click();
-  URL.revokeObjectURL(link.href);
+const STATUS_TONE: Record<OrderStatus, 'success' | 'warn' | 'accent' | 'muted' | 'danger'> = {
+  paid: 'success', khata: 'warn', offline: 'accent', part_returned: 'muted', returned: 'danger',
+};
+
+function paidBy(sale: Sale, t: (key: string) => string) {
+  if (sale.payments.length > 1) return t('pg.methods.split');
+  const method = sale.payments[0]?.method;
+  return method ? t(`pg.methods.${method}`) : t('pg.common.none');
+}
+
+function csvCell(value: string | number) {
+  const text = String(value);
+  // A leading = + - @ would run as a formula in Excel.
+  return `"${(/^[=+@-]/.test(text) ? `'${text}` : text).replace(/"/g, '""')}"`;
 }
 
 export default function SalesPage() {
   const { t } = useTranslation();
   const can = useCan();
-  const [sales, setSales] = useState<Sale[]>([]);
-  const [count, setCount] = useState(0);
-  const [revenue, setRevenue] = useState(0);
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const [range, setRange] = useState<Range>(params.get('search') ? '30d' : 'today');
+  const [search, setSearch] = useState(params.get('search') ?? '');
+  const [debounced, setDebounced] = useState(search);
+  const [terminal, setTerminal] = useState('');
+  const [cashier, setCashier] = useState('');
+  const [method, setMethod] = useState('');
   const [page, setPage] = useState(1);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [terminal, setTerminal] = useState('all');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const [rows, setRows] = useState<Sale[]>([]);
+  const [count, setCount] = useState(0);
+  const [summary, setSummary] = useState<OrdersSummary | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [viewing, setViewing] = useState<Sale | null>(null);
-  const [returning, setReturning] = useState(false);
-  const [walkInReturn, setWalkInReturn] = useState(false);
+  const [returning, setReturning] = useState<Sale | null>(null);
+  const [walkIn, setWalkIn] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    const timer = window.setTimeout(() => setDebounced(search.trim()), 300);
     return () => window.clearTimeout(timer);
   }, [search]);
 
@@ -77,238 +84,292 @@ export default function SalesPage() {
     salesApi.terminals().then(({ data }) => setTerminals(data)).catch(() => undefined);
   }, []);
 
-  const load = useCallback(async (pageNumber: number) => {
+  const filters = useMemo(() => ({
+    ...rangeDates(range),
+    search: debounced || undefined,
+    terminal: terminal || undefined,
+    cashier: cashier || undefined,
+    method: method || undefined,
+  }), [cashier, debounced, method, range, terminal]);
+
+  useEffect(() => setPage(1), [filters]);
+
+  const load = useCallback(async () => {
     setLoading(true);
     setError(false);
     try {
-      const { data } = await salesApi.list({
-        page: pageNumber,
-        search: debouncedSearch || undefined,
-        terminal: terminal === 'all' ? undefined : terminal,
-        from: from || undefined,
-        to: to || undefined,
-      });
-      setSales((current) => (pageNumber === 1 ? data.results : [...current, ...data.results]));
-      setCount(data.count);
-      setRevenue(Number(data.revenue));
-      setPage(pageNumber);
+      const [list, kpis] = await Promise.all([
+        salesApi.list({ ...filters, page, page_size: PAGE_SIZE }),
+        ordersApi.summary(filters),
+      ]);
+      setRows(list.data.results);
+      setCount(list.data.count);
+      setSummary(kpis.data);
+      setSelectedId((current) => (list.data.results.some((sale) => sale.id === current) ? current : list.data.results[0]?.id ?? null));
     } catch {
       setError(true);
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, from, terminal, to]);
+  }, [filters, page]);
 
   useEffect(() => {
-    void load(1);
+    void load();
   }, [load]);
 
-  const hasMore = sales.length < count;
-  const loadMore = useCallback(() => {
-    if (!hasMore || loading) return;
-    return load(page + 1);
-  }, [hasMore, loading, load, page]);
-  const sentinelRef = useInfiniteScroll(hasMore && !loading, loadMore);
+  const selected = rows.find((sale) => sale.id === selectedId) ?? null;
 
-  const status = viewing ? saleStatus(viewing, t) : null;
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const all: Sale[] = [];
+      for (let p = 1; all.length < Math.min(count, EXPORT_MAX); p += 1) {
+        const { data } = await salesApi.list({ ...filters, page: p, page_size: EXPORT_PAGE });
+        all.push(...data.results);
+        if (data.results.length < EXPORT_PAGE) break;
+      }
+      const header = ['Invoice', 'Date', 'Register', 'Cashier', 'Customer', 'Phone', 'Paid by', 'Status', 'Subtotal', 'Discount', 'Tax', 'Total', 'Returned'];
+      const body = all.slice(0, EXPORT_MAX).map((sale) => [
+        sale.invoice_no, sale.created_at, sale.terminal_name, sale.cashier_name, sale.customer_name, sale.customer_phone ?? '',
+        sale.payments.map((payment) => payment.method).join(' + '), sale.status ?? '', sale.subtotal, sale.discount, sale.tax, sale.total, sale.returned_total,
+      ]);
+      const csv = [header, ...body].map((row) => row.map(csvCell).join(',')).join('\n');
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }));
+      link.download = `orders-${filters.from}-${filters.to}.csv`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      if (count > EXPORT_MAX) toast(t('pg.orders.exportCapped', { max: EXPORT_MAX }), { tone: 'warning' });
+    } catch {
+      toast(t('pg.common.loadError'), { tone: 'warning' });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const rangeOptions: { value: Range; label: string }[] = [
+    { value: 'today', label: t('pg.common.today') },
+    { value: 'yesterday', label: t('pg.common.yesterday') },
+    { value: '7d', label: t('pg.common.days7') },
+    { value: '30d', label: t('pg.common.days30') },
+    { value: 'month', label: t('pg.common.thisMonth') },
+  ];
+  const rangeLabel = rangeOptions.find((option) => option.value === range)!.label;
 
   return (
-    <>
-      <Header
-        title={t('sales.title')}
-        subtitle={t('sales.subtitleOrders', { count, revenue: formatCurrency(revenue) })}
-        actions={(
-          <div className="flex gap-2">
-            {can('returns.create') && (
-              <Button variant="outline" size="sm" onClick={() => setWalkInReturn(true)}>
-                <Undo2 className="h-4 w-4" /> {t('sales.walkInReturn')}
-              </Button>
-            )}
-            {can('sales.export') && (
-              <Button variant="outline" size="sm" disabled={sales.length === 0} onClick={() => downloadCsv(sales)}>
-                <Download className="h-4 w-4" /> {t('sales.export')}
-              </Button>
-            )}
-          </div>
-        )}
-      />
-
-      <main className="page-bg flex min-h-0 flex-1 overflow-hidden">
-        <div className={cn('flex min-w-0 flex-1 flex-col overflow-y-auto p-4 sm:p-6 lg:p-8', viewing && 'lg:pe-0')}>
-          <StatStrip
-            className="mb-6"
-            items={[
-              { key: 'revenue', label: t('sales.totalRevenue'), value: formatCurrency(revenue), hint: t('common.pkr') },
-              { key: 'count', label: t('sales.invoices'), value: String(count), hint: t('sales.completed') },
-              { key: 'avg', label: t('sales.avgBill'), value: formatCurrency(count ? Math.round((revenue / count) * 100) / 100 : 0), hint: t('sales.perInvoice') },
-            ]}
+    <PageShell crumb={t('nav.sales')}>
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0 space-y-4">
+          <PageHeading
+            title={t('nav.sales')}
+            subtitle={summary ? t('pg.orders.subtitle', { count: summary.orders.toLocaleString(), period: rangeLabel.toLowerCase(), revenue: formatCurrency(num(summary.revenue)) }) : ' '}
+            actions={
+              <>
+                {can('sales.export') && (
+                  <Button variant="outline" onClick={() => void exportCsv()} loading={exporting} disabled={count === 0}>
+                    <Download className="h-4 w-4" /> {t('pg.common.export')}
+                  </Button>
+                )}
+                {can('returns.create') && <Button variant="outline" onClick={() => setWalkIn(true)}>{t('pg.orders.newReturn')}</Button>}
+              </>
+            }
           />
 
-          <Card padding="none" hover className="flex-1">
-            <div className="grid gap-3 border-b border-brand-100 p-4 sm:grid-cols-2 lg:grid-cols-4 dark:border-brand-800">
-              <Input placeholder={t('sales.searchPlaceholder')} aria-label={t('sales.searchPlaceholder')} value={search} onChange={(e) => setSearch(e.target.value)} icon={<Search className="h-4 w-4" />} />
-              <Select
-                aria-label={t('sales.counter')}
-                value={terminal}
-                onChange={(e) => setTerminal(e.target.value)}
-                options={[
-                  { value: 'all', label: t('sales.allCounters') },
-                  ...terminals.map((item) => ({ value: String(item.id), label: item.name })),
-                ]}
-              />
-              <Input type="date" aria-label={t('sales.from')} title={t('sales.from')} value={from} onChange={(e) => setFrom(e.target.value)} />
-              <Input type="date" aria-label={t('sales.to')} title={t('sales.to')} value={to} onChange={(e) => setTo(e.target.value)} />
-            </div>
+          {summary && (
+            <KpiStrip
+              items={[
+                { key: 'orders', label: t('nav.sales'), value: summary.orders.toLocaleString(), delta: <Delta value={summary.orders_change} suffix="" /> },
+                { key: 'avg', label: t('pg.orders.avgBill'), value: formatCurrency(Math.round(num(summary.avg_bill))), delta: <Delta value={summary.avg_bill_change} /> },
+                {
+                  key: 'returns', label: t('pg.orders.returns'),
+                  value: `${summary.returns_count} · ${formatCurrency(num(summary.returns_amount))}`,
+                  hint: t('pg.orders.ofSales', { share: summary.returns_share }),
+                },
+                {
+                  key: 'offline', label: t('pg.orders.syncedOffline'), value: summary.offline_count,
+                  hint: summary.offline_terminals.length ? t('pg.orders.from', { names: summary.offline_terminals.join(', ') }) : t('pg.orders.allOnline'),
+                },
+              ]}
+            />
+          )}
 
-            {error && <p role="alert" className="m-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-300">{t('sales.loadError')}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <SearchField value={search} onChange={setSearch} placeholder={t('pg.orders.searchPlaceholder')} className="w-full sm:w-64" />
+            <FilterSelect label={t('pg.orders.period')} value={range} onChange={(value) => setRange(value as Range)} options={rangeOptions} />
+            <FilterSelect
+              label={t('pg.orders.registers')}
+              value={terminal}
+              onChange={setTerminal}
+              options={[{ value: '', label: t('pg.orders.allRegisters') }, ...terminals.map((item) => ({ value: String(item.id), label: item.name }))]}
+            />
+            <FilterSelect
+              label={t('pg.orders.cashiers')}
+              value={cashier}
+              onChange={setCashier}
+              options={[{ value: '', label: t('pg.orders.allCashiers') }, ...(summary?.cashiers ?? []).map((item) => ({ value: String(item.cashier_id), label: item.cashier__full_name || '—' }))]}
+            />
+            <FilterSelect
+              label={t('pg.orders.payment')}
+              value={method}
+              onChange={setMethod}
+              options={[{ value: '', label: t('pg.orders.payment') }, ...['cash', 'jazzcash', 'easypaisa', 'card', 'credit', 'raast'].map((value) => ({ value, label: t(`pg.methods.${value}`) }))]}
+            />
+          </div>
 
-            <div className="overflow-x-auto">
-              <table className="data-table min-w-[760px]">
-                <thead>
-                  <tr>
-                    <th>{t('sales.invoice')}</th>
-                    <th>{t('sales.counter')}</th>
-                    <th>{t('sales.customer')}</th>
-                    <th>{t('sales.date')}</th>
-                    <th>{t('sales.payment')}</th>
-                    <th>{t('sales.status')}</th>
-                    <th className="text-end">{t('sales.total')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sales.map((sale) => {
-                    const rowStatus = saleStatus(sale, t);
-                    const selected = viewing?.id === sale.id;
-                    return (
-                      <tr
-                        key={sale.id}
-                        onClick={() => setViewing(sale)}
-                        className={cn('cursor-pointer', selected && 'bg-accent-soft/60 dark:bg-accent/10')}
-                      >
-                        <td>
-                          <div className="flex items-center gap-2">
-                            <Receipt className="h-4 w-4 text-brand-400" />
-                            <span dir="ltr" className="font-mono text-xs font-semibold">{sale.invoice_no}</span>
-                          </div>
-                        </td>
-                        <td><Badge>{sale.terminal_name}</Badge></td>
-                        <td className="max-w-[10rem] truncate">{sale.customer_name || t('sales.walkIn')}</td>
-                        <td className="tabular-nums text-brand-500">{formatDate(sale.created_at)}</td>
-                        <td>
-                          <div className="flex flex-wrap gap-1">
-                            {sale.payments.map((payment) => (
-                              <Badge key={payment.method} variant="info">{t(METHOD_KEYS[payment.method])}</Badge>
-                            ))}
-                          </div>
-                        </td>
-                        <td><Badge variant={rowStatus.variant}>{rowStatus.label}</Badge></td>
-                        <td className="text-end font-semibold tabular-nums">{formatCurrency(Number(sale.total))}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {!loading && !error && sales.length === 0 && (
-                <EmptyState icon={Receipt} title={t('sales.empty')} />
-              )}
-            </div>
-
-            <div ref={sentinelRef} className="h-8" aria-hidden />
-            {loading && sales.length > 0 && (
-              <p className="border-t border-brand-100 px-4 py-3 text-center text-xs text-brand-400 dark:border-brand-800">
-                {t('common.loading')}
-              </p>
+          <div className="overflow-hidden rounded-xl border border-brand-200 bg-white dark:border-brand-800 dark:bg-brand-900">
+            {error ? (
+              <ErrorState message={t('pg.common.loadError')} retryLabel={t('pg.common.retry')} onRetry={() => void load()} />
+            ) : loading && rows.length === 0 ? (
+              <SkeletonRows rows={8} columns={6} />
+            ) : rows.length === 0 ? (
+              <EmptyState icon={Receipt} title={t('pg.orders.empty')} description={t('pg.orders.emptyHint')} />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[720px] text-sm">
+                  <thead>
+                    <tr className="border-b border-brand-200 text-[13px] text-brand-500 dark:border-brand-800">
+                      <th className="px-4 py-3 text-start font-normal">{t('pg.orders.invoice')}</th>
+                      <th className="px-4 py-3 text-start font-normal">{t('pg.orders.register')}</th>
+                      <th className="px-4 py-3 text-start font-normal">{t('pg.orders.customer')}</th>
+                      <th className="px-4 py-3 text-start font-normal">{t('pg.orders.paidBy')}</th>
+                      <th className="px-4 py-3 text-start font-normal">{t('pg.orders.status')}</th>
+                      <th className="px-4 py-3 text-end font-normal">{t('pg.orders.total')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className={cn(loading && 'opacity-60')}>
+                    {rows.map((sale) => {
+                      const status = (sale.status ?? 'paid') as OrderStatus;
+                      const active = sale.id === selectedId;
+                      return (
+                        <tr
+                          key={sale.id}
+                          onClick={() => setSelectedId(sale.id)}
+                          aria-selected={active}
+                          className={cn('cursor-pointer border-b border-brand-100 last:border-0 dark:border-brand-800', active ? 'bg-accent-soft/60 dark:bg-accent-soft/40' : 'hover:bg-brand-50 dark:hover:bg-brand-800/40')}
+                        >
+                          <td className="px-4 py-3">
+                            <button type="button" className="text-start focus-ring" onClick={() => setSelectedId(sale.id)}>
+                              <span dir="ltr" className="block font-medium tabular-nums text-brand-900 dark:text-white">{sale.invoice_no}</span>
+                              <span className="block text-[13px] text-brand-500">{range === 'today' ? clockTime(sale.created_at) : `${shortDate(sale.created_at)} · ${clockTime(sale.created_at)}`}</span>
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 text-brand-800 dark:text-brand-200">{sale.terminal_name} <span className="text-brand-400">· {sale.cashier_name}</span></td>
+                          <td className="px-4 py-3 text-brand-800 dark:text-brand-200">{sale.customer_name || t('pg.orders.walkIn')}</td>
+                          <td className="px-4 py-3 text-brand-600 dark:text-brand-300">{paidBy(sale, t)}</td>
+                          <td className="px-4 py-3"><Pill tone={STATUS_TONE[status]}>{t(`pg.orders.st_${status}`)}</Pill></td>
+                          <td className="num px-4 py-3 text-end font-semibold text-brand-900 dark:text-white">{formatCurrency(num(sale.total))}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
-          </Card>
+            <Pager page={page} pageSize={PAGE_SIZE} total={count} onPage={setPage} />
+          </div>
         </div>
 
-        {viewing && (
-          <aside className="flex w-full shrink-0 flex-col border-t border-brand-200 bg-white max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-40 max-lg:max-h-[70vh] max-lg:rounded-t-2xl max-lg:shadow-elevated lg:w-[380px] lg:border-s lg:border-t-0 dark:border-brand-800 dark:bg-brand-950">
-            <div className="flex items-start justify-between gap-3 border-b border-brand-100 px-4 py-3 dark:border-brand-800">
-              <div className="min-w-0">
-                {status && <Badge variant={status.variant}>{status.label}</Badge>}
-                <p dir="ltr" className="mt-1 font-mono text-sm font-semibold">{viewing.invoice_no}</p>
-                <p className="text-xs text-brand-500">{formatDate(viewing.created_at)} · {viewing.terminal_name}</p>
-              </div>
-              <button type="button" className="rounded-lg p-1.5 text-brand-400 hover:bg-brand-100 hover:text-brand-800 focus-ring dark:hover:bg-brand-800" onClick={() => setViewing(null)} aria-label={t('common.close')}>
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+        <OrderDetail
+          sale={selected}
+          canReturn={can('returns.create')}
+          canSeeCustomer={can('customers.view')}
+          onReturn={(sale) => setReturning(sale)}
+          onViewCustomer={(id) => navigate(`/customers?id=${id}`)}
+        />
+      </div>
 
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 text-sm">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-brand-400">{t('sales.customer')}</p>
-                <p className="mt-1 font-medium">{viewing.customer_name || t('sales.walkIn')}</p>
-                <p className="text-xs text-brand-500">{t('sales.cashier')}: {viewing.cashier_name}</p>
-              </div>
-
-              <div className="divide-y divide-brand-100 dark:divide-brand-800">
-                {viewing.lines.map((line) => (
-                  <div key={line.id || line.barcode} className="flex justify-between gap-3 py-2">
-                    <span>
-                      {line.name}{' '}
-                      <span className="text-brand-500">× {Number(line.quantity)}</span>
-                      {Number(line.returned_quantity) > 0 && (
-                        <span className="ms-2 text-xs text-amber-600">{t('sales.returnedCount', { count: Number(line.returned_quantity) })}</span>
-                      )}
-                    </span>
-                    <span className="shrink-0 font-semibold tabular-nums">{formatCurrency(Number(line.line_total))}</span>
-                  </div>
-                ))}
-              </div>
-
-              <dl className="space-y-1.5 border-t border-brand-200 pt-3 dark:border-brand-700">
-                {[
-                  [t('sales.subtotal'), viewing.subtotal],
-                  [t('sales.discount'), viewing.discount],
-                  [t('sales.tax'), viewing.tax],
-                  [t('sales.total'), viewing.total],
-                  ...viewing.payments.map((payment) => [t(METHOD_KEYS[payment.method]), payment.amount] as const),
-                  ...(Number(viewing.returned_total) > 0 ? [[t('sales.returnedTotal'), viewing.returned_total] as const] : []),
-                ].map(([label, value]) => (
-                  <div key={String(label)} className="flex justify-between gap-3">
-                    <dt className="text-brand-500">{label}</dt>
-                    <dd className="font-medium tabular-nums">{formatCurrency(Number(value))}</dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-
-            <div className="flex gap-2 border-t border-brand-100 p-3 dark:border-brand-800">
-              <Button variant="outline" className="flex-1" onClick={() => void printReceipt(viewing)}>
-                <Printer className="h-4 w-4" /> {t('pos.printReceipt')}
-              </Button>
-              {can('returns.create') && viewing.lines.some((line) => Number(line.returned_quantity) < Number(line.quantity)) && (
-                <Button variant="accent" className="flex-1" onClick={() => setReturning(true)}>
-                  <Undo2 className="h-4 w-4" /> {t('sales.returnItems')}
-                </Button>
-              )}
-            </div>
-          </aside>
-        )}
-      </main>
-
-      {returning && viewing && (
+      {returning && (
         <ReturnModal
-          sale={viewing}
-          onClose={() => setReturning(false)}
-          onDone={(sale) => {
-            setReturning(false);
-            setViewing(sale);
-            void load(1);
+          sale={returning}
+          onClose={() => setReturning(null)}
+          onDone={() => {
+            setReturning(null);
+            void load();
           }}
         />
       )}
-      {walkInReturn && (
+      {walkIn && (
         <WalkInReturnModal
           terminals={terminals}
-          onClose={() => setWalkInReturn(false)}
+          onClose={() => setWalkIn(false)}
           onDone={() => {
-            setWalkInReturn(false);
-            void load(1);
+            setWalkIn(false);
+            void load();
           }}
         />
       )}
-    </>
+    </PageShell>
+  );
+}
+
+function OrderDetail({ sale, canReturn, canSeeCustomer, onReturn, onViewCustomer }: {
+  sale: Sale | null; canReturn: boolean; canSeeCustomer: boolean; onReturn: (sale: Sale) => void; onViewCustomer: (id: number) => void;
+}) {
+  const { t } = useTranslation();
+  if (!sale) {
+    return (
+      <aside className="hidden rounded-xl border border-dashed border-brand-200 p-8 text-center text-sm text-brand-500 xl:block dark:border-brand-800">
+        {t('pg.orders.pick')}
+      </aside>
+    );
+  }
+  const status = (sale.status ?? 'paid') as OrderStatus;
+  const owes = num(sale.customer_balance);
+  const fullyReturned = status === 'returned';
+  return (
+    <aside aria-label={t('pg.orders.detail')} className="overflow-hidden rounded-xl border border-brand-200 bg-white xl:sticky xl:top-20 dark:border-brand-800 dark:bg-brand-900">
+      <div className="border-b border-brand-100 px-5 py-4 dark:border-brand-800">
+        <div className="flex items-start justify-between">
+          <Pill tone={STATUS_TONE[status]}>{t(`pg.orders.st_${status}`)}</Pill>
+          <span className="text-[13px] text-brand-500">{clockTime(sale.created_at)}</span>
+        </div>
+        <p dir="ltr" className="mt-3 text-lg font-semibold tabular-nums text-brand-900 dark:text-white">{sale.invoice_no}</p>
+        <p className="text-[13px] text-brand-500">{sale.terminal_name} · {sale.cashier_name} · {shortDate(sale.created_at)}</p>
+      </div>
+      {sale.customer && (
+        <div className="flex items-center gap-3 border-b border-brand-100 px-5 py-3.5 dark:border-brand-800">
+          <Avatar name={sale.customer_name} round className="bg-accent-soft text-accent" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm text-brand-900 dark:text-white">{sale.customer_name}</p>
+            <p className="truncate text-[13px] text-brand-500">
+              <span dir="ltr">{sale.customer_phone}</span>
+              {owes > 0 && ` · ${t('pg.register.owes', { amount: formatCurrency(owes) })}`}
+            </p>
+          </div>
+          {canSeeCustomer && <button type="button" onClick={() => onViewCustomer(sale.customer!)} className="text-[13px] text-brand-500 hover:text-brand-900 focus-ring dark:hover:text-white">{t('pg.common.view')}</button>}
+        </div>
+      )}
+      <ul className="divide-y divide-brand-100 px-5 dark:divide-brand-800">
+        {sale.lines.map((line) => {
+          const returned = num(line.returned_quantity);
+          return (
+            <li key={line.id} className="flex justify-between gap-3 py-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm text-brand-900 dark:text-white">{line.name}</p>
+                <p className="text-[13px] text-brand-500">
+                  {num(line.quantity)} × {formatCurrency(num(line.unit_price))}
+                  {returned > 0 && <span className="ms-1 text-red-500">· {t('pg.orders.returnedQty', { count: returned })}</span>}
+                </p>
+              </div>
+              <span className="num shrink-0 text-sm text-brand-900 dark:text-white">{formatCurrency(num(line.line_total))}</span>
+            </li>
+          );
+        })}
+      </ul>
+      <dl className="space-y-1.5 border-t border-brand-100 px-5 py-4 text-sm dark:border-brand-800">
+        <div className="flex justify-between text-brand-500"><dt>{t('pos.subtotal')}</dt><dd className="num">{formatCurrency(num(sale.subtotal))}</dd></div>
+        <div className="flex justify-between text-brand-500"><dt>{t('pg.register.discount')}</dt><dd className="num">{num(sale.discount) ? `− ${formatCurrency(num(sale.discount))}` : '—'}</dd></div>
+        {num(sale.returned_total) > 0 && (
+          <div className="flex justify-between text-red-500"><dt>{t('pg.orders.returns')}</dt><dd className="num">− {formatCurrency(num(sale.returned_total))}</dd></div>
+        )}
+        <div className="flex justify-between pt-1.5 text-base font-semibold text-brand-900 dark:text-white"><dt>{t('pg.orders.total')}</dt><dd className="num">{formatCurrency(num(sale.total))}</dd></div>
+      </dl>
+      <div className="grid grid-cols-2 gap-2 px-5 pb-5">
+        <Button variant="outline" onClick={() => void printReceipt(sale)}>{t('pg.orders.printReceipt')}</Button>
+        <Button variant="outline" disabled={!canReturn || fullyReturned || sale.is_offline && sale.id === 0} onClick={() => onReturn(sale)}>
+          {t('pg.orders.returnItems')}
+        </Button>
+      </div>
+    </aside>
   );
 }

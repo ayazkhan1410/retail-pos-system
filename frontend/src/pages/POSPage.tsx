@@ -988,7 +988,7 @@ export default function POSPage() {
                 <Avatar name={saleCustomer.name} size="sm" round />
                 <span className="min-w-0 flex-1 truncate text-sm">
                   {saleCustomer.name}
-                  {saleCustomer.phone && <span className="text-brand-500"> · {saleCustomer.phone}</span>}
+                  {saleCustomer.phone && <span className="text-brand-500"> · <span dir="ltr">{saleCustomer.phone}</span></span>}
                   {Number(saleCustomer.balance) > 0 && <span className="text-amber-700 dark:text-amber-300"> · {t('pg.register.owes', { amount: formatCurrency(Number(saleCustomer.balance)) })}</span>}
                 </span>
                 <button type="button" onClick={() => setSaleCustomer(null)} aria-label={t('pg.register.removeCustomer')} className="rounded p-1 text-brand-400 hover:text-brand-800 dark:hover:text-white">

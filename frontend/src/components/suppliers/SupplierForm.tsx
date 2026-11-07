@@ -17,6 +17,7 @@ const emptyForm: SupplierFormData = {
   notes: '',
   status: 'active',
   paymentType: 'credit',
+  paymentTermsDays: null,
   currentBalance: 0,
 };
 
@@ -54,6 +55,7 @@ export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) 
         notes: supplier.notes ?? '',
         status: supplier.status,
         paymentType: supplier.paymentType,
+        paymentTermsDays: supplier.paymentTermsDays ?? null,
         currentBalance: supplier.currentBalance,
       });
     } else {
@@ -62,7 +64,9 @@ export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) 
   }, [supplier]);
 
   const handleChange = (field: keyof SupplierFormData, value: string) => {
-    if (field === 'currentBalance') {
+    if (field === 'paymentTermsDays') {
+      setForm((prev) => ({ ...prev, paymentTermsDays: value === '' ? null : Math.max(0, Math.min(365, Math.round(Number(value) || 0))) }));
+    } else if (field === 'currentBalance') {
       setForm((prev) => ({ ...prev, currentBalance: Number(value) || 0 }));
     } else if (field === 'paymentType') {
       setForm((prev) => ({ ...prev, paymentType: value as 'credit' | 'cash' }));
@@ -137,6 +141,15 @@ export default function SupplierForm({ supplier, onSubmit }: SupplierFormProps) 
           { value: 'credit', label: t('suppliers.paymentCredit') },
           { value: 'cash', label: t('suppliers.paymentCash') },
         ]}
+      />
+      <Input
+        label={t('pg.suppliers.terms')}
+        type="number"
+        min={0}
+        max={365}
+        placeholder={t('pg.suppliers.termsHint')}
+        value={form.paymentTermsDays ?? ''}
+        onChange={(e) => handleChange('paymentTermsDays', e.target.value)}
       />
       <Input
         label={t('suppliers.currentBalance')}

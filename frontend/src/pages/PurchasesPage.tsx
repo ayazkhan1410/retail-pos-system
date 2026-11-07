@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Plus, Save, Trash2, Truck, X } from 'lucide-react';
-import { Header } from '@/layouts/DashboardLayout';
+import { useSearchParams } from 'react-router-dom';
+import { AlertTriangle, ArrowLeft, Plus, Save, Trash2, Truck, Undo2, X } from 'lucide-react';
+import PageShell from '@/components/layout/PageShell';
 import { Badge, Button, Card, CardTitle, Input, Select, confirmAction } from '@/components/ui';
+import { KpiStrip, LinkButton, PageHeading, Pill } from '@/components/ui/Kit';
+import { purchasePagesApi } from '@/services/pages';
+import type { PurchaseSummary } from '@/types/pages';
+import { cn, num, shortDate } from '@/utils';
 import { apiErrorMessage } from '@/services';
 import { purchasesApi, suppliersApi } from '@/services/endpoints';
 import { mapSupplierFromApi } from '@/services/suppliers';
@@ -15,6 +20,7 @@ const emptyGrn = (): GRN => ({
   supplier: '',
   date: localDate(),
   po_no: '',
+  supplier_invoice_no: '',
   payment_type: 'credit',
   disc_percent: '0',
   flat_disc: '0',
@@ -37,6 +43,23 @@ const LINE_NUMBERS = [
   ['freight', 'purchases.lineFreight'],
 ] as const;
 
+function lineFor(product: Product): GRNLine {
+  return {
+    product: Number(product.id),
+    product_name: product.name,
+    barcode: product.barcode,
+    cases: '0',
+    qty: '1',
+    free: '0',
+    rate: String(product.cost),
+    disc: '0',
+    disc_percent: '0',
+    freight: '0',
+    retail: String(product.price),
+    expiry_date: null,
+  };
+}
+
 export default function PurchasesPage() {
   const { t } = useTranslation();
   const can = useCan();
@@ -50,13 +73,23 @@ export default function PurchasesPage() {
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<'grn' | 'returns'>('grn');
+  /** The design's landing list, or the full GRN editor. */
+  const [mode, setMode] = useState<'list' | 'edit'>('list');
+  const [summary, setSummary] = useState<PurchaseSummary | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const previewRun = useRef(0);
 
   const readOnly = grn.status === 'posted' || grn.status === 'voided' || !can('purchases.edit');
   const supplier = suppliers.find((item) => Number(item.id) === grn.supplier);
 
   const loadHistory = useCallback(() => {
-    purchasesApi.list().then(({ data }) => setHistory(data.results)).catch(() => setError(t('purchases.loadError')));
+    purchasesApi.list().then(({ data }) => {
+      setHistory(data.results);
+      setSelectedId((current) => (data.results.some((item) => item.id === current) ? current : data.results[0]?.id ?? null));
+    }).catch(() => setError(t('purchases.loadError')));
+    purchasePagesApi.summary().then(({ data }) => setSummary(data)).catch(() => undefined);
   }, [t]);
 
   const loadSuppliers = useCallback(() => {
@@ -70,6 +103,23 @@ export default function PurchasesPage() {
     loadSuppliers();
     loadHistory();
   }, [fetchProducts, loadHistory, loadSuppliers]);
+
+  // Home → Needs attention → Reorder: start a delivery for that product from its supplier.
+  const reorderId = searchParams.get('reorder');
+  useEffect(() => {
+    if (!reorderId || products.length === 0 || !can('purchases.edit')) return;
+    const product = products.find((item) => item.id === reorderId);
+    if (!product) return;
+    const next = emptyGrn();
+    const supplierId = product.supplierId ? Number(product.supplierId) : '';
+    next.supplier = suppliers.some((item) => Number(item.id) === supplierId) ? supplierId : '';
+    next.lines = [lineFor(product)];
+    setGrn(next);
+    setMode('edit');
+    setTab('grn');
+    setSearchParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the catalogue and suppliers are in
+  }, [reorderId, products.length, suppliers.length]);
 
   // Totals come from the server, so the screen can never disagree with what posting will do.
   useEffect(() => {
@@ -105,23 +155,41 @@ export default function PurchasesPage() {
 
   const addProduct = (product: Product) => {
     setSearch('');
-    setGrn((current) => ({
-      ...current,
-      lines: [...current.lines, {
-        product: Number(product.id),
-        product_name: product.name,
-        barcode: product.barcode,
-        cases: '0',
-        qty: '1',
-        free: '0',
-        rate: String(product.cost),
-        disc: '0',
-        disc_percent: '0',
-        freight: '0',
-        retail: String(product.price),
-        expiry_date: null,
-      }],
-    }));
+    setGrn((current) => ({ ...current, lines: [...current.lines, lineFor(product)] }));
+  };
+
+  const startNew = () => {
+    setGrn(emptyGrn());
+    setMessage('');
+    setError('');
+    setTab('grn');
+    setMode('edit');
+  };
+
+  const openGrn = (item: GRN) => {
+    setGrn(item);
+    setMessage('');
+    setError('');
+    setTab('grn');
+    setMode('edit');
+  };
+
+  const postFromList = async (item: GRN) => {
+    if (!item.id || !(await confirmAction({ title: t('purchases.confirmPost') }))) return;
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const { data } = await purchasesApi.post(item.id);
+      setMessage(t('purchases.posted', { number: data.number ?? '', total: formatCurrency(Number(data.total)) }));
+      await fetchProducts();
+      loadSuppliers();
+      loadHistory();
+    } catch (err) {
+      setError(apiErrorMessage(err, t('purchases.saveError')));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const save = async (): Promise<number | undefined> => {
@@ -155,6 +223,8 @@ export default function PurchasesPage() {
       const id = await save();
       const { data } = await purchasesApi.post(id!);
       setGrn(emptyGrn());
+      setMode('list');
+      setSelectedId(data.id ?? null);
       await fetchProducts();
       loadSuppliers();
       return t('purchases.posted', { number: data.number ?? '', total: formatCurrency(Number(data.total)) });
@@ -178,6 +248,7 @@ export default function PurchasesPage() {
     void run(async () => {
       await purchasesApi.remove(grn.id!);
       setGrn(emptyGrn());
+      setMode('list');
       return t('purchases.draftDeleted');
     });
   };
@@ -189,20 +260,34 @@ export default function PurchasesPage() {
     : null);
 
   return (
-    <>
-      <Header
-        title={`GRN — ${t('purchases.title')}`}
-        subtitle={t('purchases.subtitle')}
+    <PageShell crumb={t('nav.purchases')} subCrumb={tab === 'returns' ? t('pg.purchases.supplierReturns') : mode === 'edit' ? (grn.number ?? (grn.id ? t('purchases.draft') : t('pg.purchases.newDelivery'))) : undefined}>
+      {mode === 'list' && tab === 'grn' ? (
+        <PurchaseList
+          history={history}
+          summary={summary}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          showAll={showAll}
+          onShowAll={() => setShowAll((value) => !value)}
+          canEdit={can('purchases.edit')}
+          busy={saving}
+          message={message}
+          error={error}
+          onReceive={startNew}
+          onEdit={openGrn}
+          onPost={(item) => void postFromList(item)}
+          onReturns={() => setTab('returns')}
+        />
+      ) : (
+      <>
+      <PageHeading
+        title={tab === 'returns' ? t('pg.purchases.supplierReturns') : grn.number ? `${grn.number} · ${grn.supplier_name ?? ''}` : t('pg.purchases.receiveGoods')}
+        subtitle={tab === 'returns' ? t('pg.purchases.returnsSubtitle') : t('purchases.subtitle')}
         actions={(
-          <div className="flex gap-2">
-            <div className="flex rounded-lg bg-brand-100 p-0.5 dark:bg-brand-800">
-              <Button variant={tab === 'grn' ? 'accent' : 'ghost'} size="sm" onClick={() => setTab('grn')}>
-                {t('purchases.grnTab')}
-              </Button>
-              <Button variant={tab === 'returns' ? 'accent' : 'ghost'} size="sm" onClick={() => setTab('returns')}>
-                {t('purchases.returnsTab')}
-              </Button>
-            </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => { setTab('grn'); setMode('list'); setMessage(''); setError(''); loadHistory(); }}>
+              <ArrowLeft className="h-4 w-4 rtl:rotate-180" /> {t('pg.purchases.backToList')}
+            </Button>
             {tab === 'grn' && !readOnly && (
               <>
                 {grn.id && (
@@ -213,8 +298,8 @@ export default function PurchasesPage() {
                 <Button variant="outline" size="sm" onClick={() => void saveDraft()} disabled={!grn.supplier || grn.lines.length === 0} loading={saving}>
                   <Save className="h-4 w-4" /> {t('purchases.draftSave')}
                 </Button>
-                <Button variant="accent" size="sm" onClick={post} disabled={!grn.supplier || grn.lines.length === 0 || saving}>
-                  {t('purchases.purchaseComplete')}
+                <Button size="sm" onClick={post} disabled={!grn.supplier || grn.lines.length === 0 || saving}>
+                  {t('pg.purchases.postToStock')}
                 </Button>
               </>
             )}
@@ -222,7 +307,7 @@ export default function PurchasesPage() {
         )}
       />
 
-      <main className="page-bg flex-1 overflow-y-auto p-4 lg:p-6">
+      <div>
         {tab === 'returns' ? <PurchaseReturnPanel /> : (
           <>
         {message && <p role="status" className="mb-4 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">{message}</p>}
@@ -246,7 +331,7 @@ export default function PurchasesPage() {
         )}
 
         <Card hover className="mb-4" padding="sm">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
             <Select
               id="grn-supplier"
               label={t('purchases.selectSupplier')}
@@ -258,6 +343,7 @@ export default function PurchasesPage() {
               }}
               options={[{ value: '', label: '—' }, ...suppliers.map((item) => ({ value: item.id, label: item.name })), ...(grn.status === 'posted' && grn.supplier_name ? [{ value: String(grn.supplier), label: grn.supplier_name }] : [])]}
             />
+            <Input id="grn-invoice" label={t('pg.purchases.supplierInvoice')} maxLength={50} disabled={readOnly} value={grn.supplier_invoice_no ?? ''} onChange={(e) => set('supplier_invoice_no', e.target.value)} />
             <Input id="grn-po" label={t('purchases.poNo')} disabled={readOnly} value={grn.po_no} onChange={(e) => set('po_no', e.target.value)} />
             <Input id="grn-date" label={t('sales.date')} type="date" disabled={readOnly} value={grn.date} onChange={(e) => set('date', e.target.value)} />
             <Select id="grn-type" label={t('purchases.type')} disabled={readOnly} value={grn.payment_type} onChange={(e) => set('payment_type', e.target.value as GRN['payment_type'])} options={[{ value: 'credit', label: t('purchases.credit') }, { value: 'cash', label: t('pos.cash') }]} />
@@ -397,23 +483,172 @@ export default function PurchasesPage() {
           </Card>
         </div>
 
-        <Card padding="none" hover>
-          <div className="border-b border-brand-100 px-4 py-3 dark:border-brand-800"><CardTitle>{t('purchases.history')}</CardTitle></div>
-          {history.length === 0 && <p className="py-6 text-center text-sm text-brand-500">{t('purchases.noHistory')}</p>}
-          <div className="divide-y divide-brand-100 dark:divide-brand-800">
-            {history.map((item) => (
-              <button key={item.id} type="button" onClick={() => { setGrn(item); setMessage(''); setError(''); }} className="flex w-full items-center gap-3 px-4 py-2.5 text-start text-sm hover:bg-brand-50/60 dark:hover:bg-brand-800/30">
-                <span dir="ltr" className="w-28 font-mono text-xs font-semibold">{item.number ?? t('purchases.draft')}</span>
-                <span className="min-w-0 flex-1 truncate">{item.supplier_name} · {item.date}</span>
-                <Badge variant={item.status === 'posted' ? 'success' : 'warning'}>{item.status === 'posted' ? t('purchases.statusPosted') : t('purchases.draft')}</Badge>
-                <span className="font-bold">{formatCurrency(Number(item.total))}</span>
-              </button>
-            ))}
-          </div>
-        </Card>
           </>
         )}
-      </main>
+      </div>
+      </>
+      )}
+    </PageShell>
+  );
+}
+
+const GRN_TONE = { draft: 'muted', posted: 'success', voided: 'danger' } as const;
+
+function PurchaseList({
+  history, summary, selectedId, onSelect, showAll, onShowAll, canEdit, busy, message, error, onReceive, onEdit, onPost, onReturns,
+}: {
+  history: GRN[];
+  summary: PurchaseSummary | null;
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+  showAll: boolean;
+  onShowAll: () => void;
+  canEdit: boolean;
+  busy: boolean;
+  message: string;
+  error: string;
+  onReceive: () => void;
+  onEdit: (grn: GRN) => void;
+  onPost: (grn: GRN) => void;
+  onReturns: () => void;
+}) {
+  const { t } = useTranslation();
+  const rows = showAll ? history : history.slice(0, 8);
+  const selected = history.find((item) => item.id === selectedId) ?? null;
+  return (
+    <>
+      <PageHeading
+        title={t('nav.purchases')}
+        subtitle={t('pg.purchases.subtitle')}
+        actions={
+          <>
+            <Button variant="outline" onClick={onReturns}><Undo2 className="h-4 w-4" /> {t('pg.purchases.supplierReturns')}</Button>
+            {canEdit && <Button onClick={onReceive}><Plus className="h-4 w-4" /> {t('pg.purchases.receiveGoods')}</Button>}
+          </>
+        }
+      />
+      {message && <p role="status" className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">{message}</p>}
+      {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">{error}</p>}
+      {summary && (
+        <KpiStrip
+          items={[
+            { key: 'month', label: t('pg.common.thisMonth'), value: formatMoneyShortSafe(num(summary.month_total)), hint: t('pg.purchases.deliveries', { count: summary.month_deliveries }) },
+            { key: 'drafts', label: t('pg.purchases.drafts'), value: summary.drafts, hint: t('pg.purchases.notPosted', { amount: formatCurrency(num(summary.drafts_total)) }) },
+            { key: 'costs', label: t('pg.purchases.costChanges'), value: summary.cost_changes, hint: t('pg.purchases.upDown', { up: summary.cost_up, down: summary.cost_down }) },
+            { key: 'owed', label: t('pg.purchases.owed'), value: formatCurrency(num(summary.owed_total)), hint: t('pg.purchases.suppliers', { count: summary.suppliers_owed }) },
+          ]}
+        />
+      )}
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <section className="overflow-hidden rounded-xl border border-brand-200 bg-white dark:border-brand-800 dark:bg-brand-900">
+          <header className="flex items-center justify-between px-5 pb-3 pt-4">
+            <h2 className="text-[15px] font-semibold text-brand-900 dark:text-white">{t('pg.purchases.recent')}</h2>
+            {history.length > 8 && <LinkButton onClick={onShowAll}>{showAll ? t('pg.purchases.fewer') : t('pg.common.all')}</LinkButton>}
+          </header>
+          {history.length === 0 ? (
+            <p className="border-t border-brand-100 px-5 py-10 text-center text-sm text-brand-500 dark:border-brand-800"><Truck className="mx-auto mb-2 h-8 w-8 text-brand-300" />{t('purchases.noHistory')}</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px] text-sm">
+                <thead>
+                  <tr className="border-y border-brand-100 text-[13px] text-brand-500 dark:border-brand-800">
+                    <th className="px-5 py-2.5 text-start font-normal">GRN</th>
+                    <th className="px-3 py-2.5 text-start font-normal">{t('pg.products.supplier')}</th>
+                    <th className="px-3 py-2.5 text-start font-normal">{t('pg.purchases.date')}</th>
+                    <th className="px-3 py-2.5 text-start font-normal">{t('pg.orders.status')}</th>
+                    <th className="px-5 py-2.5 text-end font-normal">{t('pg.orders.total')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((item) => (
+                    <tr
+                      key={item.id}
+                      onClick={() => item.id && onSelect(item.id)}
+                      aria-selected={item.id === selectedId}
+                      className={cn('cursor-pointer border-b border-brand-100 last:border-0 dark:border-brand-800', item.id === selectedId ? 'bg-accent-soft/60 dark:bg-accent-soft/40' : 'hover:bg-brand-50 dark:hover:bg-brand-800/40')}
+                    >
+                      <td dir="ltr" className="px-5 py-3 font-medium tabular-nums text-brand-900 dark:text-white">{item.number ?? t('purchases.draft')}</td>
+                      <td className="max-w-[14rem] truncate px-3 py-3 text-brand-800 dark:text-brand-200">{item.supplier_name}</td>
+                      <td className="whitespace-nowrap px-3 py-3 text-brand-500">{shortDate(item.date)}</td>
+                      <td className="px-3 py-3"><Pill tone={GRN_TONE[item.status ?? 'draft']}>{t(`pg.purchases.st_${item.status ?? 'draft'}`)}</Pill></td>
+                      <td className="num px-5 py-3 text-end font-semibold text-brand-900 dark:text-white">{formatCurrency(num(item.total))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+        {selected ? <GrnPanel grn={selected} canEdit={canEdit} busy={busy} onEdit={onEdit} onPost={onPost} /> : null}
+      </div>
     </>
+  );
+}
+
+function formatMoneyShortSafe(value: number) {
+  return value >= 1_000_000 ? `Rs ${(value / 1_000_000).toFixed(2)}M` : formatCurrency(value);
+}
+
+function GrnPanel({ grn, canEdit, busy, onEdit, onPost }: { grn: GRN; canEdit: boolean; busy: boolean; onEdit: (grn: GRN) => void; onPost: (grn: GRN) => void }) {
+  const { t } = useTranslation();
+  const changes = grn.lines.filter((line) => line.previous_cost != null && line.unit_cost != null && num(line.previous_cost) !== num(line.unit_cost));
+  const meta = [
+    t(`pg.purchases.st_${grn.status ?? 'draft'}`),
+    grn.supplier_invoice_no && t('pg.purchases.invoice', { number: grn.supplier_invoice_no }),
+    grn.created_by_name && t('pg.purchases.receivedBy', { name: grn.created_by_name }),
+  ].filter(Boolean).join(' · ');
+  return (
+    <section aria-label={grn.number ?? t('purchases.draft')} className="overflow-hidden rounded-xl border border-brand-200 bg-white dark:border-brand-800 dark:bg-brand-900">
+      <header className="flex items-start justify-between gap-3 border-b border-brand-100 px-5 py-4 dark:border-brand-800">
+        <div className="min-w-0">
+          <h2 className="truncate text-[15px] font-semibold text-brand-900 dark:text-white"><span dir="ltr">{grn.number ?? t('purchases.draft')}</span> · {grn.supplier_name}</h2>
+          <p className="truncate text-[13px] text-brand-500">{meta}</p>
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button variant="outline" size="sm" onClick={() => onEdit(grn)}>{grn.status === 'draft' && canEdit ? t('common.edit') : t('pg.common.view')}</Button>
+          {grn.status === 'draft' && canEdit && <Button size="sm" loading={busy} onClick={() => onPost(grn)}>{t('pg.purchases.postToStock')}</Button>}
+        </div>
+      </header>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[440px] text-sm">
+          <thead>
+            <tr className="border-b border-brand-100 text-[13px] text-brand-500 dark:border-brand-800">
+              <th className="px-5 py-2.5 text-start font-normal">{t('pg.purchases.item')}</th>
+              <th className="px-3 py-2.5 text-end font-normal">{t('purchases.qty')}</th>
+              <th className="px-3 py-2.5 text-end font-normal">{t('pg.purchases.costChange')}</th>
+              <th className="px-5 py-2.5 text-end font-normal">{t('purchases.lineTotal')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {grn.lines.map((line, index) => {
+              const before = line.previous_cost == null ? null : num(line.previous_cost);
+              const after = num(line.unit_cost);
+              const moved = before != null && before !== after;
+              return (
+                <tr key={line.id ?? index} className="border-b border-brand-100 last:border-0 dark:border-brand-800">
+                  <td className="px-5 py-3">
+                    <p className="text-brand-900 dark:text-white">{line.product_name}</p>
+                    <p className="text-[13px] text-brand-500">{line.expiry_date ? t('pg.purchases.expires', { date: shortDate(line.expiry_date) }) : line.barcode}</p>
+                  </td>
+                  <td className="num px-3 py-3 text-end text-brand-800 dark:text-brand-200">{num(line.qty) + num(line.free)}</td>
+                  <td className={cn('num whitespace-nowrap px-3 py-3 text-end', moved ? (after > before! ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400') : 'text-brand-700 dark:text-brand-300')}>
+                    {moved ? `${formatCurrency(before!)} → ${Math.round(after * 100) / 100}` : formatCurrency(after)}
+                  </td>
+                  <td className="num px-5 py-3 text-end font-semibold text-brand-900 dark:text-white">{formatCurrency(num(line.line_total))}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {grn.status === 'draft' && changes.length > 0 && (
+        <p className="mx-5 my-4 rounded-lg bg-amber-50 px-4 py-3 text-[13px] text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+          {t('pg.purchases.costNote', { count: changes.length })}
+        </p>
+      )}
+      {grn.status === 'voided' && grn.void_reason && (
+        <p className="mx-5 my-4 rounded-lg bg-red-50 px-4 py-3 text-[13px] text-red-700 dark:bg-red-500/10 dark:text-red-300">{grn.void_reason}</p>
+      )}
+    </section>
   );
 }

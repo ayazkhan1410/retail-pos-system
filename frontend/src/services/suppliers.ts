@@ -13,6 +13,7 @@ export interface SupplierApi {
   bank_account?: string | null;
   credit_balance?: string | number | null;
   payment_type?: string | null;
+  payment_terms_days?: number | null;
   status?: string | null;
   notes?: string | null;
   created_at?: string | null;
@@ -50,6 +51,7 @@ export function mapSupplierFromApi(data: SupplierApi): Supplier {
     notes: data.notes ?? undefined,
     status: (data.status === 'inactive' ? 'inactive' : 'active'),
     paymentType: (data.payment_type === 'cash' ? 'cash' : 'credit'),
+    paymentTermsDays: data.payment_terms_days ?? null,
     currentBalance: Number(data.credit_balance ?? 0),
     totalPurchases: 0,
     createdAt: data.created_at?.split('T')[0] ?? '',
@@ -69,6 +71,7 @@ export function mapSupplierToApi(data: SupplierFormData): Record<string, unknown
     // Only used on create as the opening balance; after that the ledger owns it.
     credit_balance: data.currentBalance,
     payment_type: data.paymentType,
+    payment_terms_days: data.paymentTermsDays ?? null,
     status: data.status,
     notes: data.notes || null,
   };

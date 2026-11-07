@@ -88,7 +88,7 @@ export default function CustomerPicker({ open, customers, onClose, onPick }: {
                   <Avatar name={customer.name} round />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm text-brand-900 dark:text-white">{customer.name}</span>
-                    <span className="block truncate text-xs text-brand-500">{customer.phone || t('pg.common.none')}</span>
+                    <span dir="ltr" className="block truncate text-xs text-brand-500 rtl:text-end">{customer.phone || t('pg.common.none')}</span>
                   </span>
                   {owes > 0 && <span className="num text-xs text-amber-700 dark:text-amber-300">{t('pg.register.owes', { amount: formatCurrency(owes) })}</span>}
                 </button>

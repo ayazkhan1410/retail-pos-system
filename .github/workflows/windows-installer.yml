@@ -1,0 +1,80 @@
+name: Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['Ayaz/local-main-2']
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Build production frontend
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: /api
+        run: |
+          npm ci
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm run build
+      - name: Install build dependencies
+        run: |
+          python -m pip install -r backend/requirements.txt "Nuitka[standalone]==4.3.4" tzdata zstandard
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          npm ci --prefix desktop
+      - name: Compile server, migrations, templates and static assets
+        run: ./desktop/scripts/build-server.ps1
+      - name: Fetch pinned EDB PostgreSQL 16 x64 runtime
+        run: python desktop/scripts/stage-postgres.py
+      - name: Compile Windows service
+        run: |
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+          & $csc /nologo /target:winexe /reference:System.ServiceProcess.dll /reference:System.Security.dll '/out:desktop\service\TijoriService.exe' 'desktop\service\TijoriService.cs'
+      - name: Test compiled server on a disposable database
+        run: ./desktop/scripts/smoke-server.ps1
+      - name: Build NSIS installer and update metadata
+        working-directory: desktop
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+            if ($env:GITHUB_REF_NAME -ne "v$version") { throw "Tag v$version to match desktop/package.json." }
+          }
+          npm run dist:win
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if ($env:WIN_CSC_LINK -and (Get-AuthenticodeSignature dist/Tijori-POS-Setup.exe).Status -ne 'Valid') {
+            throw "Configured installer signing did not produce a valid signature."
+          }
+      - name: Exercise setup, service and uninstall on this disposable Windows runner
+        run: ./desktop/scripts/smoke-installer.ps1 -Installer ./desktop/dist/Tijori-POS-Setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Tijori-POS-Windows
+          if-no-files-found: error
+          path: |
+            desktop/dist/Tijori-POS-Setup.exe
+            desktop/dist/Tijori-POS-Setup.exe.blockmap
+            desktop/dist/latest.yml

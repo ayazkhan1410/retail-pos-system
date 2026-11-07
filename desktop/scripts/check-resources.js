@@ -14,6 +14,11 @@ module.exports = function checkResources() {
     'service/TijoriService.exe',
     '../frontend/dist/index.html',
   ];
+  for (const dir of ['build/postgres/bin', 'build/server']) {
+    for (const dll of ['vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll']) {
+      files.push(`${dir}/${dll}`);
+    }
+  }
   for (const file of files) {
     if (!fs.existsSync(path.resolve(root, file))) throw new Error(`Missing installer resource: ${file}. Run the Windows build steps first.`);
   }

@@ -47,6 +47,8 @@ jobs:
         run: ./desktop/scripts/build-server.ps1
       - name: Fetch pinned EDB PostgreSQL 16 x64 runtime
         run: python desktop/scripts/stage-postgres.py
+      - name: Stage signed x64 Visual C++ runtime for clean shop PCs
+        run: ./desktop/scripts/stage-vc-runtime.ps1
       - name: Compile Windows service
         run: |
           $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'

@@ -31,6 +31,34 @@ class ProductSearchTests(TestCase):
         self.assertEqual(response.data['results'][0]['barcode'], self.product.barcode)
 
     @override_settings(ELASTICSEARCH_URL='')
-    def test_search_fails_closed_without_elasticsearch(self):
+    def test_without_elasticsearch_the_database_answers(self):
         response = self.client.get('/api/inventory/products/search/', {'q': 'milk'})
-        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row['id'] for row in response.data['results']], [self.product.pk])
+
+    @override_settings(ELASTICSEARCH_URL='')
+    def test_database_ranking_and_filters(self):
+        from inventory.models import ProductBarcode
+        prefix = make_product(self.user, barcode='6281000000019')
+        Product = prefix.__class__
+        Product.objects.filter(pk=prefix.pk).update(name='Zinger Box')
+        hidden = make_product(self.user, barcode='999')
+        Product.objects.filter(pk=hidden.pk).update(name='Olper Cream', active=False)
+        ProductBarcode.objects.create(product=hidden, barcode='EXTRA-77')
+
+        def ids(q, **params):
+            return [row['id'] for row in self.client.get('/api/inventory/products/search/', {'q': q, **params}).data['results']]
+
+        # Exact barcode beats a longer barcode that merely starts with it.
+        self.assertEqual(ids('628100000001')[:2], [self.product.pk, prefix.pk])
+        self.assertEqual(ids('olper'), [self.product.pk])
+        self.assertEqual(ids('olper', include_inactive='1'), [hidden.pk, self.product.pk])
+        self.assertEqual(ids('extra-77', include_inactive='1'), [hidden.pk])
+        self.assertEqual(ids('nothing-like-this'), [])
+
+    @override_settings(ELASTICSEARCH_URL='http://elasticsearch:9200')
+    @mock.patch('inventory.services.search.get_client', side_effect=ConnectionError('down'))
+    def test_elasticsearch_down_falls_back_to_the_database(self, _client):
+        response = self.client.get('/api/inventory/products/search/', {'q': 'olper'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)

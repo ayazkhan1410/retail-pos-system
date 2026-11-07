@@ -39,7 +39,7 @@ function waitForHealth(maxAttempts = 60, onProgress) {
       attempts += 1;
       if (onProgress) {
         const percent = 40 + Math.round((attempts / maxAttempts) * 55);
-        onProgress(Math.min(percent, 95), 'Waiting for SmartShop services…');
+        onProgress(Math.min(percent, 95), 'Waiting for Tijori services…');
       }
 
       const req = http.get(HEALTH_URL, (res) => {
@@ -59,7 +59,7 @@ function waitForHealth(maxAttempts = 60, onProgress) {
 
     const retry = () => {
       if (attempts >= maxAttempts) {
-        reject(new Error('SmartShop services did not start in time.'));
+        reject(new Error('Tijori services did not start in time.'));
         return;
       }
       setTimeout(tick, 2000);
@@ -104,7 +104,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'SmartShop POS',
+    title: 'Tijori POS',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

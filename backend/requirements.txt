@@ -3,5 +3,7 @@ djangorestframework>=3.15,<4
 django-cors-headers>=4.4,<5
 psycopg2-binary>=2.9,<3
 gunicorn>=23,<24
+# Windows and non-Docker installs: production server that runs on Windows (see serve.py).
+waitress>=3.0.2,<4
 elasticsearch>=8.15,<9
 ruff>=0.9,<1

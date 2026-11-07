@@ -1,10 +1,10 @@
 {
-  "name": "smartshop-desktop",
+  "name": "tijori-desktop",
   "version": "0.1.0",
-  "description": "SmartShop POS desktop launcher",
+  "description": "Tijori POS desktop app",
   "main": "main.js",
   "private": true,
-  "author": "SmartShop",
+  "author": "Tijori",
   "scripts": {
     "postinstall": "node scripts/install-electron.js",
     "install:electron": "node scripts/install-electron.js",
@@ -14,8 +14,8 @@
     "dist:win:dir": "electron-builder --win dir --x64"
   },
   "build": {
-    "appId": "pk.smartshop.pos",
-    "productName": "SmartShop POS",
+    "appId": "pk.tijori.pos",
+    "productName": "Tijori POS",
     "directories": {
       "output": "dist"
     },
@@ -31,7 +31,7 @@
       "target": [
         "nsis"
       ],
-      "artifactName": "SmartShop-POS-Setup-${version}.${ext}"
+      "artifactName": "Tijori-POS-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,

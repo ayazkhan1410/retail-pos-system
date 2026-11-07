@@ -1,24 +1,9 @@
-import { inventoryApi } from '@/services/endpoints';
-import type { Branch, FinancialReport } from '@/types';
+import { displayName, loadStoreDetails } from './storeDetails';
+import type { FinancialReport } from '@/types';
 import { escapeHtml } from './labelPrint';
 import { formatCurrency, formatDate } from './index';
 
-const STORE_CACHE = 'smartshop-store-details';
-
-async function loadStore(): Promise<Pick<Branch, 'name' | 'address' | 'phone' | 'ntn'>> {
-  try {
-    const { data } = await inventoryApi.branch();
-    localStorage.setItem(STORE_CACHE, JSON.stringify(data));
-    return data;
-  } catch {
-    return JSON.parse(localStorage.getItem(STORE_CACHE) ?? 'null') ?? {
-      name: 'Tijori POS',
-      address: '',
-      phone: '',
-      ntn: '',
-    };
-  }
-}
+const loadStore = loadStoreDetails;
 
 function section(title: string, rows: [string, string][]) {
   if (rows.length === 0) return '';
@@ -82,7 +67,7 @@ export async function printFinancialReport(
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>${escapeHtml(labels.documentTitle)} — ${escapeHtml(store.name)}</title>
+  <title>${escapeHtml(labels.documentTitle)} — ${escapeHtml(displayName(store))}</title>
   <style>
     @page { size: A4; margin: 14mm 16mm; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -164,7 +149,7 @@ export async function printFinancialReport(
   <div class="sheet">
     <header>
       <div class="brand">
-        <h1>${escapeHtml(store.name)}</h1>
+        <h1>${escapeHtml(displayName(store))}</h1>
         ${store.address ? `<p>${escapeHtml(store.address)}</p>` : ''}
         ${store.phone ? `<p>${escapeHtml(store.phone)}</p>` : ''}
         ${store.ntn ? `<p>NTN: ${escapeHtml(store.ntn)}</p>` : ''}
@@ -218,7 +203,7 @@ export async function printFinancialReport(
 
     <footer>
       <span>${escapeHtml(labels.footer)}</span>
-      <span>${escapeHtml(store.name)}</span>
+      <span>${escapeHtml(displayName(store))}</span>
     </footer>
   </div>
 </body>

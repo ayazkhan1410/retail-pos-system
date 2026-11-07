@@ -1,4 +1,5 @@
 import type { TranslationKeys } from './en';
+import { pagesUr } from './pages.ur';
 
 export const ur: TranslationKeys = {
   auth: {
@@ -804,4 +805,5 @@ export const ur: TranslationKeys = {
       expired: 'میعاد ختم: {{name}} کی میعاد {{date}} کو ختم ہو چکی ہے۔',
     },
   },
+  pg: pagesUr,
 };

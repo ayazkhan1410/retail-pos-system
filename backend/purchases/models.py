@@ -26,6 +26,7 @@ class GRN(models.Model):
     supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='grns')
     date = models.DateField()
     po_no = models.CharField(max_length=50, blank=True)
+    supplier_invoice_no = models.CharField(max_length=50, blank=True)
     payment_type = models.CharField(max_length=10, choices=PaymentType.choices, default=PaymentType.CREDIT)
     disc_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     flat_disc = _money()

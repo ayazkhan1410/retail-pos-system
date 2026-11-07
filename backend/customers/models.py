@@ -8,6 +8,8 @@ class Customer(models.Model):
     name = models.CharField(max_length=255, db_index=True)
     phone = models.CharField(max_length=30, unique=True, null=True, blank=True)
     address = models.TextField(blank=True)
+    # Neighbourhood for "customers by area" (e.g. Gulberg III); free text, kept short.
+    area = models.CharField(max_length=100, blank=True, db_index=True)
     credit_limit = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     # What they owe the shop (khata), kept in step with the ledger.
     balance = models.DecimalField(max_digits=14, decimal_places=2, default=0)

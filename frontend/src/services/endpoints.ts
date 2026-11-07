@@ -38,7 +38,8 @@ export type UserInput = Partial<Omit<User, 'id' | 'permissions' | 'has_pin'>> & 
 };
 
 export const authApi = {
-  session: () => api.get<{ user: User | null }>('/auth/session/'),
+  session: () => api.get<{ user: User | null; pin_sign_in?: boolean }>('/auth/session/'),
+  pinLogin: (pin: string) => api.post<{ user: User }>('/auth/pin-login/', { pin }),
   login: (email: string, password: string) => api.post<{ user: User }>('/auth/login/', { email, password }),
   logout: () => api.post('/auth/logout/'),
   switchPin: (pin: string) => api.post<{ user: User }>('/auth/switch-pin/', { pin }),
@@ -137,8 +138,12 @@ export interface NewSale {
 
 export interface SaleListParams {
   page?: number;
+  page_size?: number;
   search?: string;
   terminal?: string;
+  cashier?: string;
+  method?: string;
+  status?: string;
   from?: string;
   to?: string;
 }

@@ -39,6 +39,8 @@ class Supplier(models.Model):
         choices=Status.choices, default=Status.ACTIVE,
     )
     notes = models.TextField(null=True, blank=True)
+    # Days of credit the supplier gives from each delivery; null = no agreed terms.
+    payment_terms_days = models.PositiveSmallIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

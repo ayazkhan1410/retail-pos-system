@@ -1,5 +1,7 @@
+from django.conf import settings
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.hashers import check_password
+from django.core import signing
 from django.db import transaction
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -16,6 +18,29 @@ from auth.models import CustomUser, RolePermission, UserRole
 from auth.permissions import IsOwner, requires
 from auth.serializers import UserSerializer
 
+# A browser becomes a "till" once someone who can sell signs in on it with email and password.
+# Only a till may use PIN sign-in, so a 4-6 digit PIN can't be tried from any device on the network.
+TILL_COOKIE = 'tijori_till'
+TILL_SALT = 'tijori.till-device'
+TILL_MAX_AGE = 60 * 60 * 24 * 30
+
+
+def mark_till(response, user):
+    if user.can('pos.sell'):
+        response.set_signed_cookie(
+            TILL_COOKIE, str(user.pk), salt=TILL_SALT, max_age=TILL_MAX_AGE, httponly=True, samesite='Lax',
+            secure=getattr(settings, 'SESSION_COOKIE_SECURE', False),
+        )
+    return response
+
+
+def is_till(request):
+    try:
+        request.get_signed_cookie(TILL_COOKIE, salt=TILL_SALT, max_age=TILL_MAX_AGE)
+    except (KeyError, signing.BadSignature):
+        return False
+    return True
+
 
 @method_decorator(ensure_csrf_cookie, name='dispatch')
 class SessionView(APIView):
@@ -25,7 +50,10 @@ class SessionView(APIView):
 
     def get(self, request):
         user = request.user
-        return Response({'user': UserSerializer(user).data if user.is_authenticated else None})
+        return Response({
+            'user': UserSerializer(user).data if user.is_authenticated else None,
+            'pin_sign_in': is_till(request),
+        })
 
 
 class LoginView(APIView):
@@ -45,7 +73,7 @@ class LoginView(APIView):
             return Response({'detail': 'Incorrect email or password.'}, status=status.HTTP_400_BAD_REQUEST)
         login(request, user)
         log_event(user, 'login', user.email)
-        return Response({'user': UserSerializer(user).data})
+        return mark_till(Response({'user': UserSerializer(user).data}), user)
 
 
 class LogoutView(APIView):
@@ -94,6 +122,38 @@ class SwitchByPinView(APIView):
             login(request, user)
             log_event(user, 'login', user.email, {'via': 'pin'})
             return Response({'user': UserSerializer(user).data})
+        return Response({'detail': 'Incorrect PIN.'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PinLoginView(APIView):
+    """Cashier sign-in with a PIN from the login screen. Tills only, cashier-level roles only."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'login'
+
+    def post(self, request):
+        if not is_till(request):
+            return Response(
+                {'detail': 'PIN sign-in works only on a till where staff have signed in with email before.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        pin = str(request.data.get('pin', '')).strip()
+        if not pin.isdigit() or not (4 <= len(pin) <= 6):
+            return Response({'detail': 'Enter a 4-6 digit PIN.'}, status=status.HTTP_400_BAD_REQUEST)
+        for user in CustomUser.objects.filter(is_active=True).exclude(pin='').iterator(chunk_size=100):
+            if not check_password(pin, user.pin):
+                continue
+            allowed = (
+                not user.is_superuser and _PIN_ROLE_RANK.get(user.role or '', 99) <= 1 and user.can('pos.sell')
+            )
+            if not allowed:
+                break
+            login(request, user)
+            log_event(user, 'login', user.email, {'via': 'pin'})
+            return mark_till(Response({'user': UserSerializer(user).data}), user)
+        log_event(None, 'login_failed', 'pin')
         return Response({'detail': 'Incorrect PIN.'}, status=status.HTTP_400_BAD_REQUEST)
 
 

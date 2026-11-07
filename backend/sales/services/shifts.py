@@ -22,7 +22,9 @@ def expected_cash(shift):
     change = total(shift.sales.all(), 'change_due')
     refunds = total(shift.returns.filter(method=Payment.Method.CASH), 'total')
     collected = total(shift.customer_entries.filter(kind=CustomerLedgerEntry.Kind.PAYMENT, method='cash'), 'delta')
-    return shift.opening_cash + cash_in - change - refunds - collected  # collected is negative on the ledger
+    paid_out = total(shift.expenses.all(), 'amount')
+    # collected is negative on the ledger; paid_out is cash taken from the drawer for expenses.
+    return shift.opening_cash + cash_in - change - refunds - collected - paid_out
 
 
 def open_shift(user, terminal, opening_cash):
@@ -85,6 +87,7 @@ def build_z_report(shift):
         'returns_count': len(returns),
         'returns_total': str(returns_total),
         'net_sales': str(sales_total - returns_total),
+        'paid_out': str(sum((row.amount for row in shift.expenses.all()), Decimal(0))),
         'payments': {method: str(amount) for method, amount in sorted(payments.items())},
         'invoices': [
             {

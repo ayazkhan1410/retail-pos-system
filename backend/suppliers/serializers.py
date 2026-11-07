@@ -3,8 +3,9 @@ from decimal import Decimal
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import Supplier, SupplierLedgerEntry
 from suppliers.services import post_supplier_entry
+
+from .models import Supplier, SupplierLedgerEntry
 
 
 class UniqueNameMixin:
@@ -21,11 +22,21 @@ class UniqueNameMixin:
 
 
 class SupplierListSerializer(serializers.ModelSerializer):
+    # From suppliers.services.with_standing / due_dates; absent on plain querysets.
+    last_delivery = serializers.DateField(read_only=True, default=None)
+    bought_this_year = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True, default=None)
+    due_date = serializers.SerializerMethodField()
+
     class Meta:
         model = Supplier
         fields = (
             "id",
             "name",
+            "contact_person",
+            "payment_terms_days",
+            "last_delivery",
+            "bought_this_year",
+            "due_date",
             "phone",
             "email",
             "address",
@@ -38,6 +49,10 @@ class SupplierListSerializer(serializers.ModelSerializer):
             "notes",
             "created_at",
         )
+
+    def get_due_date(self, supplier):
+        due = self.context.get("due_dates", {}).get(supplier.pk)
+        return due.isoformat() if due else None
 
 
 class SupplierDetailSerializer(serializers.ModelSerializer):
@@ -60,11 +75,13 @@ class CreateSupplierSerializer(UniqueNameMixin, serializers.ModelSerializer):
             "bank_account",
             "credit_balance",
             "payment_type",
+            "payment_terms_days",
             "status",
             "notes",
         )
 
         extra_kwargs = {
+            "payment_terms_days": {"required": False, "max_value": 365},
             "name": {
                 "required": True,
                 "allow_blank": False,
@@ -140,12 +157,13 @@ class UpdateSupplierSerializer(UniqueNameMixin, serializers.ModelSerializer):
             "ntn",
             "bank_account",
             "payment_type",
+            "payment_terms_days",
             "status",
             "notes",
         )
         extra_kwargs = {
-            field: {"required": False}
-            for field in fields
+            **{field: {"required": False} for field in fields},
+            "payment_terms_days": {"required": False, "max_value": 365},
         }
 
 

@@ -9,7 +9,9 @@ from sales.views import (
     OpenShiftView,
     ReturnCreateView,
     SaleListCreateView,
+    SaleSummaryView,
     ShiftZReportView,
+    TerminalDetailView,
     TerminalListView,
 )
 
@@ -18,8 +20,10 @@ urlpatterns = [
     path('returns/', ReturnCreateView.as_view()),
     path('held/', HeldBillListCreateView.as_view()),
     path('held/<int:pk>/', HeldBillDetailView.as_view()),
+    path('summary/', SaleSummaryView.as_view()),
     path('dashboard/', DashboardView.as_view()),
     path('terminals/', TerminalListView.as_view()),
+    path('terminals/<int:pk>/', TerminalDetailView.as_view()),
     path('terminals/<int:terminal_id>/shift/', CurrentShiftView.as_view()),
     path('shifts/', OpenShiftView.as_view()),
     path('shifts/<int:pk>/close/', CloseShiftView.as_view()),

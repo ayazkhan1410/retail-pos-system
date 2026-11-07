@@ -9,11 +9,13 @@ from purchases.views import (
     PurchaseReturnDetailView,
     PurchaseReturnListCreateView,
     PurchaseReturnPostView,
+    PurchaseSummaryView,
 )
 
 urlpatterns = [
     path('', GRNListCreateView.as_view()),
     path('preview/', GRNPreviewView.as_view()),
+    path('summary/', PurchaseSummaryView.as_view()),
     path('returns/', PurchaseReturnListCreateView.as_view()),
     path('returns/<int:pk>/', PurchaseReturnDetailView.as_view()),
     path('returns/<int:pk>/post/', PurchaseReturnPostView.as_view()),

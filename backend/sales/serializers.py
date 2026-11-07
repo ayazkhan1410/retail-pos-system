@@ -13,7 +13,28 @@ HELD_BILL_LIMIT = 40
 class TerminalSerializer(serializers.ModelSerializer):
     class Meta:
         model = Terminal
-        fields = ('id', 'code', 'name')
+        fields = ('id', 'code', 'name', 'active')
+        extra_kwargs = {'code': {'max_length': 6}}
+
+    def validate_code(self, value):
+        value = value.strip().upper()
+        if not value.isalnum():
+            raise serializers.ValidationError('Use letters and numbers only, like C3.')
+        if self.instance and self.instance.code != value and self.instance.last_invoice_seq:
+            # Invoice numbers embed the code; changing it would break the gap-free sequence.
+            raise serializers.ValidationError('This register already has invoices, so its code cannot change.')
+        clash = Terminal.objects.filter(code=value)
+        if self.instance:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError('Another register already uses this code.')
+        return value
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('Give the register a name.')
+        return value
 
 
 class ShiftSerializer(serializers.ModelSerializer):
@@ -84,7 +105,10 @@ class SaleSerializer(serializers.ModelSerializer):
     terminal_name = serializers.CharField(source='terminal.name')
     cashier_name = serializers.CharField(source='cashier.full_name')
     customer_name = serializers.CharField(source='customer.name', default='')
+    customer_phone = serializers.CharField(source='customer.phone', default='')
+    customer_balance = serializers.DecimalField(source='customer.balance', max_digits=14, decimal_places=2, default=None)
     returned_total = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
     lines = SaleLineSerializer(many=True)
     payments = PaymentSerializer(many=True)
 
@@ -92,12 +116,25 @@ class SaleSerializer(serializers.ModelSerializer):
         model = Sale
         fields = (
             'id', 'invoice_no', 'terminal', 'terminal_name', 'cashier_name', 'customer', 'customer_name',
-            'is_offline', 'subtotal', 'discount', 'tax', 'total', 'returned_total', 'change_due',
+            'customer_phone', 'customer_balance', 'status', 'is_offline', 'subtotal', 'discount', 'tax', 'total', 'returned_total', 'change_due',
             'created_at', 'lines', 'payments',
         )
 
     def get_returned_total(self, sale):
         return str(sum((item.total for item in sale.returns.all()), Decimal(0)))
+
+    def get_status(self, sale):
+        """returned | part_returned | khata | offline | paid — the badge on the Orders table."""
+        returned = sum((item.total for item in sale.returns.all()), Decimal(0))
+        if returned and returned >= sale.total:
+            return 'returned'
+        if returned:
+            return 'part_returned'
+        if any(payment.method == Payment.Method.CREDIT for payment in sale.payments.all()):
+            return 'khata'
+        if sale.is_offline:
+            return 'offline'
+        return 'paid'
 
 
 class ReturnLineInputSerializer(serializers.Serializer):

@@ -72,3 +72,32 @@ export function newUuid(): string {
     (Number(c) ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (Number(c) / 4)))).toString(16),
   );
 }
+
+/** "Rs 81k", "Rs 1.24M" — for tight spaces. Full figures stay on formatCurrency. */
+export function formatMoneyShort(amount: number): string {
+  const abs = Math.abs(amount);
+  const sign = amount < 0 ? '−' : '';
+  if (abs >= 1_000_000) return `${sign}Rs ${(abs / 1_000_000).toFixed(abs >= 10_000_000 ? 1 : 2)}M`;
+  if (abs >= 10_000) return `${sign}Rs ${Math.round(abs / 1000)}k`;
+  return `${sign}${formatCurrency(abs)}`;
+}
+
+/** Number() for API money that may arrive as a string or number; never NaN. */
+export function num(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** "8:40 pm" in the shop's 12-hour style. */
+export function clockTime(date: string | Date): string {
+  return new Intl.DateTimeFormat('en-PK', { hour: 'numeric', minute: '2-digit', hour12: true })
+    .format(typeof date === 'string' ? new Date(date) : date)
+    .toLowerCase();
+}
+
+/** "6 Nov", or "6 Nov 2025" when not this year. */
+export function shortDate(date: string | Date): string {
+  const value = typeof date === 'string' ? new Date(date.length === 10 ? `${date}T00:00:00` : date) : date;
+  const sameYear = value.getFullYear() === new Date().getFullYear();
+  return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) }).format(value);
+}

@@ -1,3 +1,5 @@
+import { pagesEn } from './pages.en';
+
 export const en = {
   auth: {
     tagline: 'Every counter, every rupee, in one place.',
@@ -802,6 +804,7 @@ export const en = {
       expired: 'Expired: {{name}} expired on {{date}}.',
     },
   },
+  pg: pagesEn,
 } as const;
 
 type DeepStringMap<T> = {

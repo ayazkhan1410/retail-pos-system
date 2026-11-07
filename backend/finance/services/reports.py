@@ -7,9 +7,9 @@ from django.db.models.functions import Coalesce, ExtractHour, ExtractWeekDay, Tr
 from django.utils import timezone
 
 from audit.models import AuditLog
-from customers.models import Customer
+from customers.models import Customer, CustomerLedgerEntry
 from finance.models import Expense
-from inventory.models import Batch, Product, StockLevel, default_branch
+from inventory.models import Batch, Product, StockLevel, StockMovement, default_branch
 from sales.models import Payment, ReturnLine, Sale, SaleLine, SaleReturn, Shift
 from suppliers.models import Supplier
 
@@ -50,10 +50,20 @@ def financial_report(start, end):
     stock_value = StockLevel.objects.filter(branch=default_branch(), quantity__gt=0).annotate(
         value=ExpressionWrapper(F('quantity') * F('product__cost'), output_field=MONEY),
     )
+    written_off = _written_off(start, end)
+    days = (end - start).days + 1
+    previous = _net_profit(start - timedelta(days=days), start - timedelta(days=1))
+    net_profit = gross_profit - total_expenses
     return {
         'from': start,
         'to': end,
         'invoices': sales.count(),
+        # Before bill discounts, so gross - returns - discounts = net_sales.
+        'gross_before_discounts': _sum(sales, 'subtotal'),
+        'stock_written_off': written_off,
+        'net_profit_after_write_offs': net_profit - written_off,
+        'previous_net_profit_after_write_offs': previous,
+        'margin_by_category': _margin_by_category(lines),
         'gross_sales': gross_sales,
         'returns': returned,
         'discounts': _sum(sales, 'discount'),
@@ -62,7 +72,7 @@ def financial_report(start, end):
         'gross_profit': gross_profit,
         'gross_margin_percent': round(gross_profit / net_sales * 100, 1) if net_sales else 0,
         'expenses': total_expenses,
-        'net_profit': gross_profit - total_expenses,
+        'net_profit': net_profit,
         'tax_collected': _sum(sales, 'tax') - _sum(returns, 'tax'),
         'expenses_by_category': list(expenses.values('category').annotate(amount=Sum('amount')).order_by('-amount')),
         'payments': list(Payment.objects.filter(sale__in=sales).values('method').annotate(amount=Sum('amount')).order_by('-amount')),
@@ -72,6 +82,230 @@ def financial_report(start, end):
         'stock_value': _sum(stock_value, 'value'),
         'supplier_payable': _sum(Supplier.objects.all(), 'credit_balance'),
         'customer_receivable': _sum(Customer.objects.all(), 'balance'),
+    }
+
+
+def _written_off(start, end):
+    """Damaged and expired stock taken off the shelf, valued at the product's current cost (no cost history per movement)."""
+    rows = StockMovement.objects.filter(
+        created_at__date__gte=start, created_at__date__lte=end, delta__lt=0,
+        reason__in=[StockMovement.Reason.DAMAGE, StockMovement.Reason.EXPIRED],
+    ).annotate(value=ExpressionWrapper(-F('delta') * F('product__cost'), output_field=MONEY))
+    return _sum(rows, 'value')
+
+
+def _net_profit(start, end):
+    """Net profit after expenses and write-offs, for comparing one period with another."""
+    sales = Sale.objects.filter(created_at__date__gte=start, created_at__date__lte=end)
+    returns = SaleReturn.objects.filter(created_at__date__gte=start, created_at__date__lte=end)
+    returned_cost = ReturnLine.objects.filter(sale_return__in=returns, restocked=True).annotate(
+        cost=ExpressionWrapper(F('sale_line__unit_cost') * F('quantity'), output_field=MONEY),
+    )
+    net_sales = _sum(sales, 'total') - _sum(returns, 'total')
+    cost = _cost_of(SaleLine.objects.filter(sale__in=sales)) - _sum(returned_cost, 'cost')
+    expenses = _sum(Expense.objects.filter(date__gte=start, date__lte=end), 'amount')
+    return net_sales - cost - expenses - _written_off(start, end)
+
+
+def _margin_by_category(lines):
+    """Net sales and gross margin per category. Returns are not split by category, so this is before returns."""
+    rows = lines.values(category=F('product__category__name')).annotate(
+        revenue=Coalesce(Sum('line_total'), ZERO, output_field=MONEY),
+        cost=Coalesce(Sum(ExpressionWrapper(F('unit_cost') * F('quantity'), output_field=MONEY)), ZERO, output_field=MONEY),
+    ).order_by('-revenue')
+    return [
+        {
+            'category': row['category'],
+            'net_sales': row['revenue'],
+            'margin_percent': round((row['revenue'] - row['cost']) / row['revenue'] * 100, 1) if row['revenue'] else 0,
+        }
+        for row in rows
+    ]
+
+
+def trend(months):
+    """Net sales and net profit per calendar month, oldest first, ending with the current month."""
+    today = timezone.localdate()
+    first = today.replace(day=1)
+    for _ in range(months - 1):
+        first = (first - timedelta(days=1)).replace(day=1)
+    out = []
+    while first <= today:
+        last = min((first + timedelta(days=32)).replace(day=1) - timedelta(days=1), today)
+        sales = Sale.objects.filter(created_at__date__gte=first, created_at__date__lte=last)
+        returns = SaleReturn.objects.filter(created_at__date__gte=first, created_at__date__lte=last)
+        out.append({
+            'month': first.isoformat(),
+            'net_sales': _sum(sales, 'total') - _sum(returns, 'total'),
+            'net_profit': _net_profit(first, last),
+        })
+        first = last + timedelta(days=1)
+    return out
+
+
+SECTIONS = ('sales', 'stock', 'tax', 'cashiers', 'khata')
+KHATA_BUCKETS = ((0, 30), (31, 60), (61, 90), (91, None))
+KHATA_ROW_LIMIT = 500
+
+
+def _sales_section(start, end):
+    sales = Sale.objects.filter(created_at__date__gte=start, created_at__date__lte=end)
+    returns = SaleReturn.objects.filter(created_at__date__gte=start, created_at__date__lte=end)
+    by_day = {
+        row['day']: row for row in sales.annotate(day=TruncDate('created_at')).values('day').annotate(
+            bills=Count('id'), gross=Coalesce(Sum('total'), ZERO, output_field=MONEY),
+            discounts=Coalesce(Sum('discount'), ZERO, output_field=MONEY),
+        )
+    }
+    returned = dict(returns.annotate(day=TruncDate('created_at')).values_list('day').annotate(v=Sum('total')))
+    days, cursor = [], start
+    while cursor <= end:
+        row = by_day.get(cursor, {'bills': 0, 'gross': ZERO, 'discounts': ZERO})
+        back = returned.get(cursor, ZERO)
+        days.append({
+            'day': cursor.isoformat(), 'bills': row['bills'], 'gross_sales': row['gross'], 'discounts': row['discounts'],
+            'returns': back, 'net_sales': row['gross'] - back,
+            'avg_bill': (row['gross'] / row['bills']).quantize(Decimal('0.01')) if row['bills'] else ZERO,
+        })
+        cursor += timedelta(days=1)
+    lines = SaleLine.objects.filter(sale__in=sales)
+    return {
+        'days': days,
+        'payments': list(Payment.objects.filter(sale__in=sales).values('method').annotate(amount=Sum('amount')).order_by('-amount')),
+        'top_products': list(lines.values('name').annotate(units=Sum('quantity'), revenue=Sum('line_total')).order_by('-revenue')[:20]),
+    }
+
+
+def _stock_section():
+    """What is on the shelf now, by category, at cost and at shelf price. Not date-ranged."""
+    rows = StockLevel.objects.filter(branch=default_branch(), quantity__gt=0, product__active=True).values(
+        category=F('product__category__name'),
+    ).annotate(
+        products=Count('product', distinct=True),
+        units=Sum('quantity'),
+        cost_value=Coalesce(Sum(ExpressionWrapper(F('quantity') * F('product__cost'), output_field=MONEY)), ZERO, output_field=MONEY),
+        retail_value=Coalesce(Sum(ExpressionWrapper(F('quantity') * F('product__price'), output_field=MONEY)), ZERO, output_field=MONEY),
+    ).order_by('-cost_value')
+    rows = list(rows)
+    return {
+        'categories': rows,
+        'cost_value': sum((row['cost_value'] for row in rows), ZERO),
+        'retail_value': sum((row['retail_value'] for row in rows), ZERO),
+        'units': sum((row['units'] for row in rows), ZERO),
+    }
+
+
+def _tax_section(start, end):
+    lines = SaleLine.objects.filter(sale__created_at__date__gte=start, sale__created_at__date__lte=end)
+    returns = SaleReturn.objects.filter(created_at__date__gte=start, created_at__date__lte=end)
+    rates = list(lines.values('tax_rate').annotate(
+        taxable=Coalesce(Sum('line_total'), ZERO, output_field=MONEY),
+        tax=Coalesce(Sum('tax_amount'), ZERO, output_field=MONEY),
+    ).order_by('tax_rate'))
+    collected = sum((row['tax'] for row in rates), ZERO)
+    returned = _sum(returns, 'tax')
+    return {'rates': rates, 'collected': collected, 'returned': returned, 'net_tax': collected - returned}
+
+
+def _cashiers_section(start, end):
+    people = {}
+
+    def person(user_id, name):
+        return people.setdefault(user_id, {
+            'id': user_id, 'name': name or '', 'bills': 0, 'sales': ZERO, 'discounts': ZERO,
+            'returns': ZERO, 'cash_difference': ZERO, 'shifts': 0,
+        })
+
+    sales = Sale.objects.filter(created_at__date__gte=start, created_at__date__lte=end)
+    for row in sales.values('cashier_id', name=F('cashier__full_name')).annotate(
+        bills=Count('id'), sales=Sum('total'), discounts=Sum('discount'),
+    ):
+        person(row['cashier_id'], row['name']).update(bills=row['bills'], sales=row['sales'], discounts=row['discounts'])
+    for row in SaleReturn.objects.filter(created_at__date__gte=start, created_at__date__lte=end).values(
+        'user_id', name=F('user__full_name'),
+    ).annotate(total=Sum('total')):
+        person(row['user_id'], row['name'])['returns'] = row['total']
+    for shift in Shift.objects.filter(closed_at__date__gte=start, closed_at__date__lte=end).select_related('closed_by'):
+        row = person(shift.closed_by_id, shift.closed_by.full_name if shift.closed_by else '')
+        row['cash_difference'] += shift.counted_cash - shift.expected_cash
+        row['shifts'] += 1
+    rows = sorted(people.values(), key=lambda row: -row['sales'])
+    for row in rows:
+        row['avg_bill'] = (row['sales'] / row['bills']).quantize(Decimal('0.01')) if row['bills'] else ZERO
+    return {'cashiers': rows}
+
+
+def _khata_section():
+    """Who owes what and for how long. Payments clear the oldest charges first, so what is left is the newest."""
+    today = timezone.localdate()
+    owing = list(Customer.objects.filter(active=True, balance__gt=0).order_by('-balance')[:KHATA_ROW_LIMIT])
+    charges = {}
+    for entry in CustomerLedgerEntry.objects.filter(customer__in=owing, delta__gt=0).order_by('customer_id', '-created_at'):
+        charges.setdefault(entry.customer_id, []).append(entry)
+    labels = [f'{low}-{high}' if high else f'{low}+' for low, high in KHATA_BUCKETS]
+    totals = dict.fromkeys(labels, ZERO)
+    rows = []
+    for customer in owing:
+        left = customer.balance
+        buckets = dict.fromkeys(labels, ZERO)
+        oldest = None
+        for entry in charges.get(customer.id, []):
+            if left <= 0:
+                break
+            part = min(entry.delta, left)
+            left -= part
+            age = (today - timezone.localtime(entry.created_at).date()).days
+            oldest = age
+            for (low, high), label in zip(KHATA_BUCKETS, labels, strict=True):
+                if age >= low and (high is None or age <= high):
+                    buckets[label] += part
+                    break
+        if left > 0:
+            # Balance older than the ledger (imported opening balance with no dated charge).
+            buckets[labels[-1]] += left
+        for label in labels:
+            totals[label] += buckets[label]
+        rows.append({
+            'id': customer.id, 'name': customer.name, 'phone': customer.phone or '', 'balance': customer.balance,
+            'credit_limit': customer.credit_limit, 'oldest_days': oldest, 'buckets': buckets,
+        })
+    return {'buckets': labels, 'totals': totals, 'customers': rows, 'truncated': len(owing) == KHATA_ROW_LIMIT}
+
+
+def report_section(section, start, end):
+    if section == 'sales':
+        return _sales_section(start, end)
+    if section == 'stock':
+        return _stock_section()
+    if section == 'tax':
+        return _tax_section(start, end)
+    if section == 'cashiers':
+        return _cashiers_section(start, end)
+    return _khata_section()
+
+
+def expenses_summary(first):
+    """The Expenses page header for one calendar month."""
+    today = timezone.localdate()
+    last = min((first + timedelta(days=32)).replace(day=1) - timedelta(days=1), today)
+    previous_first = (first - timedelta(days=1)).replace(day=1)
+    month = Expense.objects.filter(date__gte=first, date__lte=last)
+    total = _sum(month, 'amount')
+    previous = _sum(Expense.objects.filter(date__gte=previous_first, date__lt=first), 'amount')
+    sales = Sale.objects.filter(created_at__date__gte=first, created_at__date__lte=last)
+    returns = SaleReturn.objects.filter(created_at__date__gte=first, created_at__date__lte=last)
+    net_sales = _sum(sales, 'total') - _sum(returns, 'total')
+    by_category = list(month.values('category').annotate(amount=Sum('amount')).order_by('-amount'))
+    for row in by_category:
+        row['share'] = round(row['amount'] / total * 100, 1) if total else 0
+    return {
+        'month': first.isoformat(),
+        'total': total,
+        'previous_total': previous,
+        'change': round((total - previous) / previous * 100, 1) if previous else None,
+        'share_of_sales': round(total / net_sales * 100, 1) if net_sales else None,
+        'from_drawers': _sum(month.exclude(shift=None), 'amount'),
+        'by_category': by_category,
     }
 
 

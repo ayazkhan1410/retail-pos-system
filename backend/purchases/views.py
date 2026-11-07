@@ -14,6 +14,8 @@ from purchases.services import (
     calculate,
     post_grn,
     post_purchase_return,
+    previous_costs,
+    purchases_summary,
     save_grn_draft,
     save_purchase_return_draft,
     void_grn,
@@ -46,6 +48,7 @@ class GRNInput(serializers.Serializer):
     supplier = serializers.PrimaryKeyRelatedField(queryset=Supplier.objects.all())
     date = serializers.DateField()
     po_no = serializers.CharField(max_length=50, required=False, allow_blank=True, default='')
+    supplier_invoice_no = serializers.CharField(max_length=50, required=False, allow_blank=True, default='')
     payment_type = serializers.ChoiceField(choices=PaymentType.choices, default=PaymentType.CREDIT)
     disc_percent = serializers.DecimalField(**PERCENT, default=Decimal(0))
     flat_disc = serializers.DecimalField(**MONEY, default=Decimal(0))
@@ -61,14 +64,25 @@ class GRNInput(serializers.Serializer):
 class GRNLineSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name')
     barcode = serializers.CharField(source='product.barcode')
+    # Unit cost before this delivery: for a draft, the product's cost now; for a posted GRN, the
+    # previous posted delivery of the same product. Filled by GRNSerializer when previous_costs is in context.
+    previous_cost = serializers.SerializerMethodField()
 
     class Meta:
         model = GRNLine
         exclude = ('grn',)
 
+    def get_previous_cost(self, line):
+        costs = self.context.get('previous_costs')
+        if costs is None:
+            return None
+        value = costs.get(line.pk)
+        return None if value is None else str(value)
+
 
 class GRNSerializer(serializers.ModelSerializer):
     supplier_name = serializers.CharField(source='supplier.name')
+    created_by_name = serializers.CharField(source='created_by.full_name', default='', read_only=True)
     lines = GRNLineSerializer(many=True)
 
     class Meta:
@@ -84,13 +98,17 @@ class GRNListCreateView(APIView):
     permission_classes = [requires('purchases.view', 'purchases.edit')]
 
     def get(self, request):
-        queryset = GRN.objects.select_related('supplier').prefetch_related('lines__product')
+        queryset = GRN.objects.select_related('supplier', 'created_by').prefetch_related('lines__product')
         supplier = request.query_params.get('supplier')
         if supplier and supplier.isdigit():
             queryset = queryset.filter(supplier_id=supplier)
+        status_filter = request.query_params.get('status')
+        if status_filter in GRN.Status.values:
+            queryset = queryset.filter(status=status_filter)
         paginator = GRNPagination()
         page = paginator.paginate_queryset(queryset, request)
-        return paginator.get_paginated_response(GRNSerializer(page, many=True).data)
+        context = {'previous_costs': previous_costs(page)}
+        return paginator.get_paginated_response(GRNSerializer(page, many=True, context=context).data)
 
     @transaction.atomic
     def post(self, request):
@@ -98,6 +116,13 @@ class GRNListCreateView(APIView):
         data.is_valid(raise_exception=True)
         grn = save_grn_draft(GRN(branch=default_branch(), created_by=request.user), dict(data.validated_data))
         return Response(GRNSerializer(grn).data, status=status.HTTP_201_CREATED)
+
+
+class PurchaseSummaryView(APIView):
+    permission_classes = [requires('purchases.view')]
+
+    def get(self, request):
+        return Response(purchases_summary())
 
 
 class GRNPreviewView(APIView):

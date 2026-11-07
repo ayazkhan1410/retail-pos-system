@@ -28,6 +28,8 @@ interface PaymentModalProps {
   initialMethod: PaymentMethod;
   canDiscount: boolean;
   customers: Customer[];
+  /** Customer already chosen on the bill (F6), preselected here. */
+  initialCustomerId?: number | null;
   submitting: boolean;
   error: string;
   onClose: () => void;
@@ -35,7 +37,7 @@ interface PaymentModalProps {
 }
 
 export default function PaymentModal({
-  open, total, initialMethod, canDiscount, customers, submitting, error, onClose, onConfirm,
+  open, total, initialMethod, canDiscount, customers, initialCustomerId, submitting, error, onClose, onConfirm,
 }: PaymentModalProps) {
   const { t } = useTranslation();
   const [discount, setDiscount] = useState('');
@@ -47,10 +49,12 @@ export default function PaymentModal({
   useEffect(() => {
     if (!open) return;
     setDiscount('');
-    setCustomerId('');
+    setCustomerId(initialCustomerId ? String(initialCustomerId) : '');
     setAmounts({});
     setReferences({});
     window.requestAnimationFrame(() => firstInput.current?.focus());
+    // Only on opening: the cashier may change the customer inside the form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const discountValue = Math.max(0, Number(discount) || 0);

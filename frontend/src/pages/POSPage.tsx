@@ -4,11 +4,7 @@ import {
   ScanBarcode,
   Plus,
   Minus,
-  Trash2,
-  CreditCard,
-  Smartphone,
   ArrowLeft,
-  CornerDownLeft,
   X,
   LogOut,
   Lock,
@@ -23,7 +19,8 @@ import {
   Play,
   ReceiptText,
   LayoutGrid,
-  SplitSquareHorizontal,
+  MoreHorizontal,
+  UserRound,
 } from 'lucide-react';
 import { homePath, usePOSStore, useInventoryStore, useAuthStore, useCan, useThemeStore } from '@/store';
 import { useKeyboardShortcut } from '@/hooks';
@@ -42,10 +39,43 @@ import { CloseShiftModal, ShiftSummaryModal } from '@/components/pos/ShiftModals
 import type { CartItem, Customer, PaymentMethod, Product, Sale, Shift, Terminal } from '@/types';
 import { useTranslation } from '@/i18n';
 import LanguageToggle from '@/components/layout/LanguageToggle';
+import CustomerPicker from '@/components/pos/CustomerPicker';
+import { Avatar } from '@/components/ui/Kit';
 
 const CATALOG_REFRESH_MS = 60_000;
 const SYNC_INTERVAL_MS = 20_000;
 const LOW_STOCK = 10;
+const FAVOURITES_KEY = 'tijori-till-favourites';
+const FAVOURITES_SHOWN = 24;
+
+/** How often each product was added on this till, for the Favourites tab. Per device, best effort. */
+function readFavourites(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(FAVOURITES_KEY) ?? '{}') ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function bumpFavourite(id: string): Record<string, number> {
+  const counts = readFavourites();
+  counts[id] = (counts[id] ?? 0) + 1;
+  try {
+    localStorage.setItem(FAVOURITES_KEY, JSON.stringify(counts));
+  } catch {
+    // Storage full or blocked: favourites just stop updating.
+  }
+  return counts;
+}
+
+/** Name or barcode match on the cached catalogue, used when the search service can't be reached. */
+function localSearch(products: Product[], query: string): Product[] {
+  const needle = query.trim().toLowerCase();
+  return products
+    .filter((p) => p.active && (p.name.toLowerCase().includes(needle) || p.barcode.toLowerCase().includes(needle)
+      || (p.extraBarcodes ?? []).some((code) => code.toLowerCase().includes(needle))))
+    .slice(0, 48);
+}
 const isExpired = (product: Product) => getExpiryStatus(product.expiryDate) === 'expired';
 
 /** The receipt for a sale the server hasn't seen yet. The real invoice number is issued on sync. */
@@ -158,6 +188,11 @@ export default function POSPage() {
   const [scanFlash, setScanFlash] = useState(false);
   const [notice, setNotice] = useState<{ text: string; kind: 'warning' | 'error' } | null>(null);
   const [pinSwitchOpen, setPinSwitchOpen] = useState(false);
+  /** Customer picked on the bill (F6) before charging, for khata or a named receipt. */
+  const [saleCustomer, setSaleCustomer] = useState<Customer | null>(null);
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [favourites, setFavourites] = useState<Record<string, number>>(readFavourites);
   /** Phones show the bill or the products; the charge bar stays visible either way. */
   const [mobilePane, setMobilePane] = useState<'bill' | 'products'>('bill');
   /** Last line touched by a scan or tap, so it can highlight and scroll into view. */
@@ -171,7 +206,7 @@ export default function POSPage() {
   /** Prevents double auto-open while the open request is in flight. */
   const autoOpenedFor = useRef<number | null>(null);
 
-  const modalOpen = !!payMethod || !!completedSale || !!changeFlash || closingShift || !!closedShift || confirmOpen;
+  const modalOpen = !!payMethod || !!completedSale || !!changeFlash || closingShift || !!closedShift || confirmOpen || customerPickerOpen;
 
   const focusScanner = useCallback(() => {
     window.requestAnimationFrame(() => scannerRef.current?.focus());
@@ -230,7 +265,7 @@ export default function POSPage() {
   const sellableProducts = useMemo(() => products.filter((p) => p.active), [products]);
 
   const categories = useMemo(
-    () => ['All', ...Array.from(new Set(sellableProducts.map((p) => p.category))).sort()],
+    () => ['All', 'Favourites', ...Array.from(new Set(sellableProducts.map((p) => p.category))).sort()],
     [sellableProducts],
   );
 
@@ -248,7 +283,8 @@ export default function POSPage() {
           if (!cancelled) setSearchHits(data.results.map(mapProductFromApi).filter((p) => !isExpired(p)));
         })
         .catch(() => {
-          if (!cancelled) setSearchHits([]);
+          // Search service down: fall back to the catalogue already on this till instead of showing nothing.
+          if (!cancelled) setSearchHits(localSearch(useInventoryStore.getState().products, q).filter((p) => !isExpired(p)));
         });
     }, 200);
     return () => {
@@ -260,8 +296,11 @@ export default function POSPage() {
   const filteredProducts = useMemo(() => {
     const base = (searchHits ?? sellableProducts).filter((p) => !isExpired(p));
     if (category === 'All') return base;
+    if (category === 'Favourites') {
+      return base.filter((p) => favourites[p.id]).sort((a, b) => (favourites[b.id] ?? 0) - (favourites[a.id] ?? 0)).slice(0, FAVOURITES_SHOWN);
+    }
     return base.filter((p) => p.category === category);
-  }, [category, searchHits, sellableProducts]);
+  }, [category, favourites, searchHits, sellableProducts]);
 
   const refreshHolds = useCallback(async () => {
     if (!activeCounter) {
@@ -364,6 +403,7 @@ export default function POSPage() {
         return;
       }
       addToCart(product);
+      setFavourites(bumpFavourite(product.id));
       setLastAdded((prev) => ({ id: product.id, n: (prev?.n ?? 0) + 1 }));
       flashScanOk();
       setNotice(
@@ -441,13 +481,14 @@ export default function POSPage() {
       client_uuid: saleUuid.current,
       terminal: activeCounter.id,
       discount: result.discount.toFixed(2),
-      customer: result.customer,
+      customer: result.customer ?? saleCustomer?.id ?? null,
       lines: cart.map((item) => ({ product: Number(item.product.id), quantity: String(item.quantity) })),
       payments: result.payments,
     };
     const afterSale = (sale: Sale) => {
       applySale(cart.map((item) => ({ productId: item.product.id, quantity: item.quantity })));
       clearCart();
+      setSaleCustomer(null);
       setPayMethod(null);
       setFullPayForm(false);
       setNotice(null);
@@ -508,6 +549,7 @@ export default function POSPage() {
     }
     void auditApi.cartCleared(cartItemCount(), cartTotal()).catch(() => undefined);
     clearCart();
+    setSaleCustomer(null);
     setNotice(null);
     focusScanner();
   }, [cart.length, cartItemCount, cartTotal, clearCart, focusScanner, t]);
@@ -600,25 +642,38 @@ export default function POSPage() {
   useKeyboardShortcut('f4', () => void handleClearCart(), { ctrl: true });
   useKeyboardShortcut('f1', () => startPayment('cash'));
   useKeyboardShortcut('f9', () => startPayment('card'), { ctrl: true });
+  useKeyboardShortcut('f6', () => {
+    if (!modalOpen) setCustomerPickerOpen(true);
+  });
+  useKeyboardShortcut('f8', () => {
+    if (can('pos.discount')) startFullPayment();
+  });
 
   const subtotal = cartTotal();
   const itemCount = cartItemCount();
   const empty = cart.length === 0;
   const tillReady = !!shift;
   const inCart = new Map(cart.map((item) => [item.product.id, item.quantity]));
+  const taxIncluded = cart.reduce((sum, item) => {
+    const rate = Number(item.product.salesTaxPercent ?? 0);
+    const line = Math.round(item.product.salePrice * item.quantity * 100) / 100;
+    return rate > 0 ? sum + (line * rate) / (100 + rate) : sum;
+  }, 0);
   const barButton =
-    'flex h-8 items-center justify-center gap-1.5 rounded-lg border border-brand-200 bg-white px-2.5 text-sm font-medium text-brand-700 shadow-soft transition-colors hover:bg-brand-50 hover:text-brand-900 focus-ring disabled:cursor-not-allowed disabled:opacity-45 dark:border-brand-800 dark:bg-brand-900 dark:text-brand-200 dark:hover:bg-brand-800 dark:hover:text-white';
+    'flex h-9 items-center justify-center gap-1.5 rounded-lg border border-brand-200 bg-white px-3 text-sm font-medium text-brand-800 shadow-soft transition-colors hover:bg-brand-50 hover:text-brand-900 focus-ring disabled:cursor-not-allowed disabled:opacity-45 dark:border-brand-800 dark:bg-brand-900 dark:text-brand-200 dark:hover:bg-brand-800 dark:hover:text-white';
   const payButton =
-    'flex h-10 items-center justify-center gap-1.5 rounded-lg border border-brand-200 bg-white px-2 text-sm font-medium text-brand-800 shadow-soft transition-colors hover:bg-brand-50 focus-ring disabled:cursor-not-allowed disabled:opacity-45 dark:border-brand-700 dark:bg-brand-900 dark:text-brand-100 dark:hover:bg-brand-800';
+    'flex h-10 items-center justify-center rounded-lg border border-brand-200 bg-white px-2 text-sm font-medium text-brand-800 shadow-soft transition-colors hover:bg-brand-50 focus-ring disabled:cursor-not-allowed disabled:opacity-45 dark:border-brand-700 dark:bg-brand-900 dark:text-brand-100 dark:hover:bg-brand-800';
+  const menuItem =
+    'flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-start text-sm text-brand-700 hover:bg-brand-100 hover:text-brand-900 disabled:opacity-45 dark:text-brand-300 dark:hover:bg-brand-800 dark:hover:text-white';
 
   return (
     <div className="flex h-[100dvh] flex-col bg-brand-50 text-brand-900 dark:bg-brand-950 dark:text-brand-50">
-      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_minmax(380px,30vw)] lg:grid-rows-[minmax(0,1fr)_auto] 2xl:grid-cols-[minmax(0,1fr)_460px]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[auto_minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_minmax(380px,30vw)] lg:grid-rows-[minmax(0,1fr)_auto] 2xl:grid-cols-[minmax(0,1fr)_440px]">
         {/* Left: register bar, scanner, catalogue */}
         <div className="flex min-h-0 flex-col lg:row-span-2">
           <header className="flex h-14 shrink-0 items-center gap-2 border-b border-brand-200 bg-white px-3 sm:gap-3 sm:px-5 dark:border-brand-800 dark:bg-brand-950">
             {homePath(user) !== '/pos' ? (
-              <Link to={homePath(user)} aria-label={t('pos.backToDashboard')} title={t('pos.backToDashboard')} className={cn(barButton, 'w-8 px-0')}>
+              <Link to={homePath(user)} aria-label={t('pos.backToDashboard')} title={t('pos.backToDashboard')} className={cn(barButton, 'w-9 px-0')}>
                 <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
               </Link>
             ) : (
@@ -628,50 +683,25 @@ export default function POSPage() {
               <p className="truncate text-sm font-semibold">{activeCounter?.name ?? t('pos.title')}</p>
               <p className="hidden truncate text-xs text-brand-500 sm:block">
                 {user?.full_name}
-                {shift && <> · {t('pos.shiftSales')} <span className="tabular-nums">{formatCurrency(Number(shift.sales_total))}</span></>}
+                {shift && (
+                  <> · {t('pg.register.shiftLine', { total: formatCurrency(Number(shift.sales_total)), bills: shift.sales_count })}</>
+                )}
               </p>
             </div>
-            {terminals.length > 1 && (
-              <div role="group" aria-label={t('pos.counter')} className="ms-1 flex rounded-lg bg-brand-100 p-0.5 dark:bg-brand-900">
-                {terminals.map((counter) => (
-                  <button
-                    key={counter.id}
-                    type="button"
-                    onClick={() => chooseCounter(counter)}
-                    aria-pressed={activeCounter?.id === counter.id}
-                    title={counter.name}
-                    className={cn(
-                      'h-7 rounded-md px-2.5 text-xs font-semibold transition-colors',
-                      activeCounter?.id === counter.id
-                        ? 'bg-white text-brand-900 shadow-soft ring-1 ring-brand-200 dark:bg-brand-800 dark:text-white dark:ring-brand-700'
-                        : 'text-brand-500 hover:text-brand-900 dark:hover:text-white',
-                    )}
-                  >
-                    {counter.code}
-                  </button>
-                ))}
-              </div>
-            )}
             <div className="flex-1" />
             {pendingSales.length > 0 ? (
-              <span role="status" className="flex h-7 items-center gap-1.5 rounded-md bg-amber-50 px-2 text-xs font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+              <span role="status" className="flex h-6 items-center gap-1.5 rounded-md bg-amber-50 px-2 text-xs font-medium text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
                 <WifiOff className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">{t('pos.pendingSync', { count: pendingSales.length })}</span>
                 <span className="sm:hidden">{pendingSales.length}</span>
               </span>
             ) : (
-              <span className="hidden h-7 items-center gap-1.5 rounded-md bg-emerald-50 px-2 text-xs font-medium text-emerald-700 sm:flex dark:bg-emerald-500/10 dark:text-emerald-300">
+              <span className="hidden h-6 items-center gap-1.5 rounded-md bg-emerald-50 px-2 text-xs font-medium text-emerald-700 sm:flex dark:bg-emerald-500/10 dark:text-emerald-300">
                 <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> {t('pos.online')}
               </span>
             )}
             <LiveClock />
             <div className="hidden md:block"><LanguageToggle compact /></div>
-            <button type="button" onClick={toggleTheme} aria-label="Toggle theme" className={cn(barButton, 'w-8 px-0')}>
-              {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-            </button>
-            <button type="button" onClick={() => setPinSwitchOpen(true)} aria-label={t('pos.switchCashier')} title={t('pos.switchCashier')} className={cn(barButton, 'w-8 px-0')}>
-              <KeyRound className="h-4 w-4" />
-            </button>
             {shift && (
               <button
                 type="button"
@@ -680,12 +710,63 @@ export default function POSPage() {
                 title={cart.length > 0 || pendingSales.length > 0 ? t('pos.closeShiftBlocked') : undefined}
                 className={barButton}
               >
-                <Lock className="h-4 w-4" /> <span className="hidden sm:inline">{t('pos.closeShift')}</span>
+                <Lock className="h-4 w-4 sm:hidden" /> <span className="hidden sm:inline">{t('pos.closeShift')}</span>
               </button>
             )}
-            <button type="button" onClick={() => void logout()} aria-label={t('common.logout')} title={t('common.logout')} className={cn(barButton, 'w-8 px-0')}>
-              <LogOut className="h-4 w-4 rtl:rotate-180" />
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setMenuOpen((open) => !open)}
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
+                aria-label={t('pg.register.more')}
+                title={t('pg.register.more')}
+                className={cn(barButton, 'w-9 px-0')}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+              {menuOpen && (
+                <>
+                  <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-30 cursor-default" onClick={() => setMenuOpen(false)} />
+                  <div role="menu" className="absolute end-0 top-full z-40 mt-1 w-60 animate-fade-in rounded-lg border border-brand-200 bg-white p-1 shadow-elevated dark:border-brand-700 dark:bg-brand-900">
+                    {terminals.length > 1 && (
+                      <>
+                        <p className="px-2.5 pb-1 pt-1.5 text-xs text-brand-500">{t('pos.counter')}</p>
+                        {terminals.map((counter) => (
+                          <button
+                            key={counter.id}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={activeCounter?.id === counter.id}
+                            onClick={() => {
+                              chooseCounter(counter);
+                              setMenuOpen(false);
+                            }}
+                            className={cn(menuItem, activeCounter?.id === counter.id && 'font-medium text-brand-900 dark:text-white')}
+                          >
+                            <span className={cn('h-1.5 w-1.5 rounded-full', activeCounter?.id === counter.id ? 'bg-accent' : 'bg-transparent')} />
+                            {counter.name} <span className="ms-auto text-xs text-brand-400">{counter.code}</span>
+                          </button>
+                        ))}
+                        <div className="my-1 h-px bg-brand-100 dark:bg-brand-800" />
+                      </>
+                    )}
+                    <button type="button" role="menuitem" className={menuItem} onClick={() => { setMenuOpen(false); setPinSwitchOpen(true); }}>
+                      <KeyRound className="h-4 w-4" /> {t('pos.switchCashier')}
+                    </button>
+                    <button type="button" role="menuitem" className={menuItem} onClick={() => { setMenuOpen(false); void refreshHolds(); setHoldsOpen(true); }}>
+                      <Play className="h-4 w-4" /> {t('pos.heldBills')}{heldBills.length > 0 && <span className="ms-auto tabular-nums text-brand-400">{heldBills.length}</span>}
+                    </button>
+                    <button type="button" role="menuitem" className={menuItem} onClick={() => { setMenuOpen(false); toggleTheme(); }}>
+                      {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />} {t('pg.shell.toggleTheme')}
+                    </button>
+                    <button type="button" role="menuitem" className={menuItem} onClick={() => void logout()}>
+                      <LogOut className="h-4 w-4 rtl:rotate-180" /> {t('common.logout')}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </header>
           <PinSwitchModal open={pinSwitchOpen} onClose={() => setPinSwitchOpen(false)} />
 
@@ -693,13 +774,13 @@ export default function POSPage() {
             <form onSubmit={handleScannerSubmit}>
               <div
                 className={cn(
-                  'flex h-12 items-center rounded-xl border bg-white transition-[border-color,box-shadow] duration-100 dark:bg-brand-900',
+                  'flex h-[52px] items-center rounded-xl border bg-white transition-[border-color,box-shadow] duration-100 dark:bg-brand-900',
                   scanFlash
                     ? 'border-emerald-500 shadow-[0_0_0_4px_rgb(16_185_129/0.15)]'
-                    : 'border-brand-200 focus-within:border-accent focus-within:shadow-[0_0_0_4px_rgb(var(--accent)/0.12)] dark:border-brand-700',
+                    : 'border-accent/70 shadow-[0_0_0_3px_rgb(var(--accent)/0.10)] focus-within:border-accent focus-within:shadow-[0_0_0_4px_rgb(var(--accent)/0.14)]',
                 )}
               >
-                <ScanBarcode className={cn('ms-3.5 h-5 w-5 shrink-0', scanFlash ? 'text-emerald-600' : 'text-accent')} />
+                <ScanBarcode className={cn('ms-4 h-5 w-5 shrink-0', scanFlash ? 'text-emerald-600' : 'text-accent')} />
                 <input
                   ref={scannerRef}
                   value={scannerInput}
@@ -708,8 +789,8 @@ export default function POSPage() {
                     setProductSearch(e.target.value);
                     if (e.target.value) setMobilePane('products');
                   }}
-                  placeholder={t('pos.scanPlaceholder')}
-                  aria-label={t('pos.scanPlaceholder')}
+                  placeholder={t('pg.register.scanPlaceholder')}
+                  aria-label={t('pg.register.scanPlaceholder')}
                   aria-keyshortcuts="F2"
                   className="h-full min-w-0 flex-1 bg-transparent px-3 text-[15px] text-brand-900 placeholder:text-brand-400 focus:outline-none dark:text-white"
                   autoComplete="off"
@@ -718,7 +799,7 @@ export default function POSPage() {
                   enterKeyHint="go"
                   autoFocus
                 />
-                {(scannerInput || productSearch) && (
+                {(scannerInput || productSearch) ? (
                   <button
                     type="button"
                     onClick={() => {
@@ -727,15 +808,14 @@ export default function POSPage() {
                       focusScanner();
                     }}
                     aria-label={t('pos.clearSearch')}
-                    className="me-1 flex h-8 w-8 items-center justify-center rounded-lg text-brand-400 hover:bg-brand-100 hover:text-brand-700 dark:hover:bg-brand-800"
+                    className="me-2 flex h-8 w-8 items-center justify-center rounded-lg text-brand-400 hover:bg-brand-100 hover:text-brand-700 dark:hover:bg-brand-800"
                   >
                     <X className="h-4 w-4" />
                   </button>
+                ) : (
+                  <kbd aria-hidden className="me-4">F2</kbd>
                 )}
-                <button type="submit" className="me-1.5 flex h-9 items-center gap-1.5 rounded-lg bg-brand-900 px-3 text-sm font-medium text-white hover:bg-brand-800 dark:bg-white dark:text-brand-900">
-                  <CornerDownLeft className="h-4 w-4 rtl:-scale-x-100" />
-                  <span className="hidden sm:inline">{t('pos.addButton')}</span>
-                </button>
+                <button type="submit" className="sr-only">{t('pos.addButton')}</button>
               </div>
             </form>
             {(notice || catalogFailed) && (
@@ -754,7 +834,7 @@ export default function POSPage() {
 
             <div role="tablist" aria-label={t('pos.currentBill')} className="mt-3 grid grid-cols-2 gap-1 rounded-lg bg-brand-100 p-1 lg:hidden dark:bg-brand-900">
               {([
-                ['bill', ReceiptText, `${t('pos.currentBill')}${itemCount ? ` · ${itemCount}` : ''}`],
+                ['bill', ReceiptText, `${t('pg.register.currentSale')}${itemCount ? ` · ${itemCount}` : ''}`],
                 ['products', LayoutGrid, t('pos.products')],
               ] as const).map(([pane, Icon, label]) => (
                 <button
@@ -773,7 +853,7 @@ export default function POSPage() {
               ))}
             </div>
 
-            <div className={cn('mt-3 gap-1 overflow-x-auto pb-1 scrollbar-none lg:flex', mobilePane === 'products' ? 'flex' : 'hidden')}>
+            <div className={cn('mt-3.5 gap-1 overflow-x-auto pb-1 scrollbar-none lg:flex', mobilePane === 'products' ? 'flex' : 'hidden')}>
               {categories.map((cat) => (
                 <button
                   key={cat}
@@ -781,13 +861,13 @@ export default function POSPage() {
                   onClick={() => setCategory(cat)}
                   aria-pressed={category === cat}
                   className={cn(
-                    'h-8 shrink-0 rounded-lg px-3 text-sm font-medium transition-colors',
+                    'h-8 shrink-0 rounded-lg px-3 text-sm transition-colors',
                     category === cat
-                      ? 'bg-white text-brand-900 shadow-soft ring-1 ring-brand-200 dark:bg-brand-800 dark:text-white dark:ring-brand-700'
+                      ? 'bg-white font-medium text-brand-900 shadow-soft ring-1 ring-brand-200 dark:bg-brand-800 dark:text-white dark:ring-brand-700'
                       : 'text-brand-600 hover:bg-white hover:text-brand-900 dark:text-brand-400 dark:hover:bg-brand-900 dark:hover:text-white',
                   )}
                 >
-                  {cat === 'All' ? t('common.all') : cat}
+                  {cat === 'All' ? t('pg.register.allItems') : cat === 'Favourites' ? t('pg.register.favourites') : cat}
                 </button>
               ))}
             </div>
@@ -798,9 +878,13 @@ export default function POSPage() {
             className={cn('min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-2 sm:px-5 lg:block', mobilePane === 'products' ? 'block' : 'hidden')}
           >
             {filteredProducts.length === 0 ? (
-              <EmptyState icon={PackageSearch} title={t('pos.noProducts')} description={productSearch ? t('pos.noProductsHint') : undefined} />
+              <EmptyState
+                icon={PackageSearch}
+                title={category === 'Favourites' && !productSearch ? t('pg.register.noFavourites') : t('pos.noProducts')}
+                description={productSearch ? t('pos.noProductsHint') : category === 'Favourites' ? t('pg.register.noFavouritesHint') : undefined}
+              />
             ) : (
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-6">
                 {filteredProducts.map((product) => {
                   const qty = inCart.get(product.id);
                   const out = product.stock <= 0;
@@ -811,9 +895,9 @@ export default function POSPage() {
                       type="button"
                       onClick={() => addProduct(product)}
                       className={cn(
-                        'relative flex min-h-[112px] flex-col rounded-xl bg-white p-3 text-start shadow-soft transition-[box-shadow,transform] duration-100 active:scale-[0.98] focus-ring dark:bg-brand-900',
+                        'relative flex min-h-[128px] flex-col rounded-xl p-3 text-start transition-[box-shadow,transform] duration-100 active:scale-[0.98] focus-ring',
+                        out ? 'bg-brand-50 dark:bg-brand-900/50' : 'bg-white dark:bg-brand-900',
                         qty ? 'ring-2 ring-brand-900 dark:ring-white' : 'ring-1 ring-brand-200 hover:ring-brand-300 dark:ring-brand-800 dark:hover:ring-brand-700',
-                        out && 'opacity-60',
                       )}
                     >
                       {qty !== undefined && (
@@ -821,14 +905,12 @@ export default function POSPage() {
                           {qty}
                         </span>
                       )}
-                      <span aria-hidden className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-100 text-xs font-semibold text-brand-600 dark:bg-brand-800 dark:text-brand-300">
-                        {product.name.split(/\s+/).slice(0, 2).map((word) => word[0]).join('').toUpperCase()}
-                      </span>
-                      <span className="mt-auto line-clamp-2 pt-2 text-[13px] font-medium leading-snug">{product.name}</span>
+                      <Avatar name={product.name} muted={out} />
+                      <span className={cn('mt-auto line-clamp-2 pt-3 text-[13px] leading-snug', out ? 'text-brand-400' : 'text-brand-900 dark:text-white')}>{product.name}</span>
                       <span className="mt-1 flex items-baseline justify-between gap-2">
-                        <span className="num text-sm font-semibold">{formatCurrency(product.salePrice)}</span>
-                        <span className={cn('text-xs tabular-nums', out ? 'font-medium text-red-600 dark:text-red-400' : low ? 'font-medium text-amber-700 dark:text-amber-300' : 'text-brand-400')}>
-                          {product.stock} {t('pos.stockLeft')}
+                        <span className={cn('num text-sm font-semibold', out && 'text-brand-400')}>{formatCurrency(product.salePrice)}</span>
+                        <span className={cn('text-xs tabular-nums', out ? 'text-red-500 dark:text-red-400' : low ? 'text-amber-600 dark:text-amber-300' : 'text-brand-400')}>
+                          {out ? t('pg.register.out') : low ? t('pg.register.left', { count: product.stock }) : product.stock}
                         </span>
                       </span>
                     </button>
@@ -838,12 +920,13 @@ export default function POSPage() {
             )}
           </section>
 
-          <div className="hidden shrink-0 items-center gap-4 border-t border-brand-200 bg-white px-5 py-2 text-xs text-brand-500 xl:flex dark:border-brand-800 dark:bg-brand-950">
+          <div className="hidden shrink-0 items-center gap-5 px-5 py-3 text-[13px] text-brand-500 xl:flex">
             {[
-              ['F2', t('pos.shortcutsScanner')],
-              ['F1', t('pos.charge')],
-              ['Ctrl F9', t('pos.cardShort')],
-              ['Ctrl F4', t('pos.shortcutsClear')],
+              ['F1', t('pg.methods.cash')],
+              ['Ctrl F9', t('pg.methods.card')],
+              ['F6', t('pg.register.customer')],
+              ...(can('pos.discount') ? [['F8', t('pg.register.discount')]] : []),
+              ['Ctrl F4', t('pg.register.clearBill')],
             ].map(([key, label]) => (
               <span key={key} className="flex items-center gap-1.5"><kbd>{key}</kbd>{label}</span>
             ))}
@@ -852,7 +935,7 @@ export default function POSPage() {
 
         {/* Right: the sale */}
         <section
-          aria-label={t('pos.currentBill')}
+          aria-label={t('pg.register.currentSale')}
           className={cn(
             'min-h-0 flex-col border-brand-200 bg-white lg:col-start-2 lg:row-start-1 lg:flex lg:border-s dark:border-brand-800 dark:bg-brand-950',
             mobilePane === 'bill' ? 'flex' : 'hidden',
@@ -860,29 +943,29 @@ export default function POSPage() {
         >
           <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-brand-200 px-4 sm:px-5 dark:border-brand-800">
             <h2 className="text-[15px] font-semibold">
-              {t('pos.currentBill')}
-              <span className="ms-2 text-sm font-normal text-brand-500"><span className="tabular-nums">{itemCount}</span> {t('common.items')}</span>
+              {t('pg.register.currentSale')}
+              <span className="ms-2 text-[13px] font-normal text-brand-500">{t('pg.register.items', { count: itemCount })}</span>
             </h2>
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => {
-                  void refreshHolds();
-                  setHoldsOpen(true);
-                }}
-                className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-100 dark:text-brand-300 dark:hover:bg-brand-800"
-              >
-                <Play className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{t('pos.heldBills')}</span>
-                {heldBills.length > 0 && <span className="tabular-nums">({heldBills.length})</span>}
-              </button>
+              {heldBills.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void refreshHolds();
+                    setHoldsOpen(true);
+                  }}
+                  className="flex h-8 items-center gap-1 rounded-lg px-2 text-sm text-brand-500 transition-colors hover:bg-brand-100 hover:text-brand-900 dark:hover:bg-brand-800 dark:hover:text-white"
+                >
+                  <Play className="h-3.5 w-3.5" /> {t('pg.register.held', { count: heldBills.length })}
+                </button>
+              )}
               {!empty && (
                 <>
                   <button
                     type="button"
                     disabled={holdBusy || !tillReady}
                     onClick={() => void holdCurrentBill()}
-                    className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-brand-600 transition-colors hover:bg-brand-100 disabled:opacity-45 dark:text-brand-300 dark:hover:bg-brand-800"
+                    className="flex h-8 items-center gap-1 rounded-lg px-2 text-sm text-brand-500 transition-colors hover:bg-brand-100 hover:text-brand-900 disabled:opacity-45 dark:hover:bg-brand-800 dark:hover:text-white"
                   >
                     <Pause className="h-3.5 w-3.5" /> {t('pos.holdBill')}
                   </button>
@@ -890,16 +973,43 @@ export default function POSPage() {
                     type="button"
                     onClick={() => void handleClearCart()}
                     aria-keyshortcuts="Control+F4"
-                    className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-brand-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                    className="flex h-8 items-center rounded-lg px-2 text-sm text-brand-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
                   >
-                    <Trash2 className="h-3.5 w-3.5" /> {t('pos.clearAll')}
+                    {t('pg.register.clear')}
                   </button>
                 </>
               )}
             </div>
           </div>
 
-          <div ref={billListRef} className="min-h-0 flex-1 overflow-y-auto">
+          <div className="shrink-0 px-4 pt-3.5 sm:px-5">
+            {saleCustomer ? (
+              <div className="flex h-11 items-center gap-2.5 rounded-lg border border-brand-200 bg-brand-50 px-3 dark:border-brand-700 dark:bg-brand-900">
+                <Avatar name={saleCustomer.name} size="sm" round />
+                <span className="min-w-0 flex-1 truncate text-sm">
+                  {saleCustomer.name}
+                  {saleCustomer.phone && <span className="text-brand-500"> · {saleCustomer.phone}</span>}
+                  {Number(saleCustomer.balance) > 0 && <span className="text-amber-700 dark:text-amber-300"> · {t('pg.register.owes', { amount: formatCurrency(Number(saleCustomer.balance)) })}</span>}
+                </span>
+                <button type="button" onClick={() => setSaleCustomer(null)} aria-label={t('pg.register.removeCustomer')} className="rounded p-1 text-brand-400 hover:text-brand-800 dark:hover:text-white">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCustomerPickerOpen(true)}
+                aria-keyshortcuts="F6"
+                className="flex h-11 w-full items-center gap-2.5 rounded-lg border border-dashed border-brand-300 px-3 text-start text-sm text-brand-500 transition-colors hover:border-brand-400 hover:text-brand-800 focus-ring dark:border-brand-700 dark:hover:text-white"
+              >
+                <UserRound className="h-4 w-4" />
+                <span className="flex-1">{t('pg.register.addCustomer')}</span>
+                <kbd aria-hidden>F6</kbd>
+              </button>
+            )}
+          </div>
+
+          <div ref={billListRef} className="min-h-0 flex-1 overflow-y-auto pt-2">
             {empty ? (
               <div className="flex h-full min-h-[200px] flex-col items-center justify-center px-6 text-center">
                 <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-accent-soft text-accent">
@@ -911,33 +1021,33 @@ export default function POSPage() {
             ) : (
               <ul>
                 {cart.map((item) => {
-                  const flash = lastAdded?.id === item.product.id;
+                  const current = lastAdded?.id === item.product.id;
                   return (
                     <li
-                      key={flash ? `${item.product.id}-${lastAdded?.n}` : item.product.id}
+                      key={current ? `${item.product.id}-${lastAdded?.n}` : item.product.id}
                       data-line={item.product.id}
                       className={cn(
-                        'flex items-center gap-3 border-b border-brand-100 px-4 py-3 sm:px-5 dark:border-brand-800/70',
-                        flash && 'animate-row-in shadow-[inset_2px_0_0_rgb(var(--accent))]',
+                        'group relative flex items-center gap-3 border-b border-brand-100 px-4 py-3 sm:px-5 dark:border-brand-800/70',
+                        current && 'bg-accent-soft/70 shadow-[inset_3px_0_0_rgb(var(--accent))] dark:bg-accent-soft/40',
                       )}
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{item.product.name}</p>
-                        <p className="mt-0.5 truncate text-xs text-brand-500">
-                          <span className="tabular-nums">{formatCurrency(item.product.salePrice)}</span>
+                        <p className="truncate text-sm">{item.product.name}</p>
+                        <p className="mt-0.5 truncate text-[13px] text-brand-500">
+                          <span className="tabular-nums">{t('pg.register.each', { price: formatCurrency(item.product.salePrice) })}</span>
                           {item.quantity > item.product.stock && (
                             <span className="ms-2 font-medium text-amber-700 dark:text-amber-300">{t('pos.moreThanStock', { stock: item.product.stock })}</span>
                           )}
                         </p>
                       </div>
-                      <div className="flex shrink-0 items-center rounded-lg border border-brand-200 dark:border-brand-700">
+                      <div className="flex shrink-0 items-center rounded-lg border border-brand-200 bg-white dark:border-brand-700 dark:bg-brand-900">
                         <button
                           type="button"
                           onClick={() => updateQuantity(item.product.id, item.quantity - 1)}
                           aria-label={t('pos.decreaseQty', { name: item.product.name })}
                           className="flex h-8 w-8 items-center justify-center rounded-s-lg text-brand-500 hover:bg-brand-100 hover:text-brand-900 dark:hover:bg-brand-800 dark:hover:text-white"
                         >
-                          <Minus className="h-3.5 w-3.5" />
+                          <Minus className="h-3 w-3" />
                         </button>
                         {item.product.qtyDecimal ? (
                           <input
@@ -948,10 +1058,10 @@ export default function POSPage() {
                             aria-label={t('pos.qty')}
                             value={item.quantity}
                             onChange={(e) => updateQuantity(item.product.id, Number(e.target.value))}
-                            className="h-8 w-16 border-x border-brand-200 bg-transparent text-center text-sm font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent/40 dark:border-brand-700"
+                            className="h-8 w-14 border-x border-brand-200 bg-transparent text-center text-sm font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent/40 dark:border-brand-700"
                           />
                         ) : (
-                          <span className="min-w-[2rem] text-center text-sm font-semibold tabular-nums">{item.quantity}</span>
+                          <span className="min-w-[2.25rem] border-x border-brand-200 text-center text-sm font-semibold leading-8 tabular-nums dark:border-brand-700">{item.quantity}</span>
                         )}
                         <button
                           type="button"
@@ -959,7 +1069,7 @@ export default function POSPage() {
                           aria-label={t('pos.increaseQty', { name: item.product.name })}
                           className="flex h-8 w-8 items-center justify-center rounded-e-lg text-brand-500 hover:bg-brand-100 hover:text-brand-900 dark:hover:bg-brand-800 dark:hover:text-white"
                         >
-                          <Plus className="h-3.5 w-3.5" />
+                          <Plus className="h-3 w-3" />
                         </button>
                       </div>
                       <p className="num w-[5.5rem] shrink-0 text-end text-sm font-semibold">
@@ -969,9 +1079,9 @@ export default function POSPage() {
                         type="button"
                         onClick={() => removeFromCart(item.product.id)}
                         aria-label={t('pos.removeItem', { name: item.product.name })}
-                        className="-me-1.5 shrink-0 rounded-md p-1.5 text-brand-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                        className="absolute end-1 top-1 rounded p-0.5 text-brand-400 opacity-0 transition-opacity hover:text-red-600 focus:opacity-100 group-hover:opacity-100"
                       >
-                        <X className="h-4 w-4" />
+                        <X className="h-3.5 w-3.5" />
                       </button>
                     </li>
                   );
@@ -982,13 +1092,29 @@ export default function POSPage() {
         </section>
 
         {/* Totals and charge: always visible, under the sale on desktop, pinned at the bottom on phones */}
-        <div className="shrink-0 border-t border-brand-200 bg-brand-50 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 sm:px-5 lg:col-start-2 lg:row-start-2 lg:border-s dark:border-brand-800 dark:bg-[#0f1013]">
-          <div className="flex justify-between py-0.5 text-sm text-brand-500">
-            <span>{t('pos.subtotal')}</span>
-            <span className="tabular-nums">{formatCurrency(subtotal)}</span>
-          </div>
-          <p className="py-0.5 text-xs text-brand-400">{t('pos.taxIncluded')}</p>
-          <div className="mt-2 flex items-baseline justify-between">
+        <div className="shrink-0 border-t border-brand-200 bg-white px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 sm:px-5 lg:col-start-2 lg:row-start-2 lg:border-s dark:border-brand-800 dark:bg-brand-950">
+          <dl className="space-y-1 text-[13px] text-brand-500">
+            <div className="flex justify-between">
+              <dt>{t('pos.subtotal')}</dt>
+              <dd className="tabular-nums">{formatCurrency(subtotal)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt>
+                {t('pg.register.discount')}{' '}
+                {can('pos.discount') && (
+                  <button type="button" disabled={empty || !tillReady} onClick={startFullPayment} className="ms-1 font-medium text-accent hover:underline disabled:opacity-45 disabled:hover:no-underline">
+                    {t('pg.register.addDiscount')}
+                  </button>
+                )}
+              </dt>
+              <dd>—</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt>{t('pg.register.taxIncluded')}</dt>
+              <dd className="tabular-nums">{formatCurrency(Math.round(taxIncluded))}</dd>
+            </div>
+          </dl>
+          <div className="mt-4 flex items-baseline justify-between">
             <span className="text-[15px] font-semibold">{t('pos.total')}</span>
             <span className="num text-[34px] font-semibold leading-none" aria-live="polite">{formatCurrency(subtotal)}</span>
           </div>
@@ -997,24 +1123,16 @@ export default function POSPage() {
             disabled={empty || !tillReady}
             onClick={() => startPayment('cash')}
             aria-keyshortcuts="F1"
-            className="mt-3 flex h-14 w-full items-center justify-center gap-3 rounded-xl bg-brand-900 text-base font-semibold text-white shadow-soft transition-[background-color,transform] hover:bg-brand-800 active:scale-[0.99] focus-ring disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100 dark:bg-white dark:text-brand-900 dark:hover:bg-brand-100"
+            className="mt-4 flex h-14 w-full items-center justify-center gap-3 rounded-xl bg-brand-900 text-base font-semibold text-white shadow-soft transition-[background-color,transform] hover:bg-brand-800 active:scale-[0.99] focus-ring disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100 dark:bg-white dark:text-brand-900 dark:hover:bg-brand-100"
           >
             {t('pos.charge')} <span className="num">{formatCurrency(subtotal)}</span>
             <kbd className="border-white/20 bg-white/10 text-white/80 dark:border-brand-300 dark:bg-brand-100 dark:text-brand-600">F1</kbd>
           </button>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <button type="button" disabled={empty || !tillReady} onClick={() => startPayment('jazzcash')} className={payButton}>
-              <Smartphone className="h-4 w-4 shrink-0" /> <span className="truncate">{t('pos.jazzcash')}</span>
-            </button>
-            <button type="button" disabled={empty || !tillReady} onClick={() => startPayment('easypaisa')} className={payButton}>
-              <Smartphone className="h-4 w-4 shrink-0" /> <span className="truncate">{t('pos.easypaisa')}</span>
-            </button>
-            <button type="button" disabled={empty || !tillReady} onClick={() => startPayment('card')} aria-keyshortcuts="Control+F9" className={payButton}>
-              <CreditCard className="h-4 w-4 shrink-0" /> <span className="truncate">{t('pos.cardPay')}</span>
-            </button>
-            <button type="button" disabled={empty || !tillReady} onClick={startFullPayment} className={payButton}>
-              <SplitSquareHorizontal className="h-4 w-4 shrink-0" /> <span className="truncate">{t('pos.split')}</span>
-            </button>
+          <div className="mt-2.5 grid grid-cols-4 gap-2">
+            <button type="button" disabled={empty || !tillReady} onClick={() => startPayment('cash')} className={payButton}>{t('pg.methods.cash')}</button>
+            <button type="button" disabled={empty || !tillReady} onClick={() => startPayment('jazzcash')} className={payButton}>{t('pg.methods.jazzcash')}</button>
+            <button type="button" disabled={empty || !tillReady} onClick={() => startPayment('card')} aria-keyshortcuts="Control+F9" className={payButton}>{t('pg.methods.card')}</button>
+            <button type="button" disabled={empty || !tillReady} onClick={startFullPayment} className={payButton}>{t('pg.methods.split')}</button>
           </div>
         </div>
       </div>
@@ -1039,7 +1157,8 @@ export default function POSPage() {
           total={subtotal}
           initialMethod={payMethod ?? 'cash'}
           canDiscount={can('pos.discount')}
-          customers={customers}
+          customers={saleCustomer && !customers.some((c) => c.id === saleCustomer.id) ? [saleCustomer, ...customers] : customers}
+          initialCustomerId={saleCustomer?.id ?? null}
           submitting={submitting}
           error={payError}
           onClose={() => {
@@ -1113,6 +1232,20 @@ export default function POSPage() {
             }}
           />
         )}
+
+        <CustomerPicker
+          open={customerPickerOpen}
+          customers={customers}
+          onClose={() => {
+            setCustomerPickerOpen(false);
+            focusScanner();
+          }}
+          onPick={(customer) => {
+            setSaleCustomer(customer);
+            setCustomerPickerOpen(false);
+            focusScanner();
+          }}
+        />
 
         <Modal
           open={holdsOpen}

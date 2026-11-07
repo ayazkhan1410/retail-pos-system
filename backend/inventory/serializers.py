@@ -12,10 +12,18 @@ AUDITED_FIELDS = ('price', 'sale_rate', 'cost', 'sales_tax_percent', 'disc_perce
 
 
 class BranchSerializer(serializers.ModelSerializer):
+    receipt_footer = serializers.CharField(max_length=300, required=False, allow_blank=True)
+
     class Meta:
         model = Branch
-        fields = ('id', 'code', 'name', 'address', 'phone', 'ntn')
+        fields = ('id', 'code', 'name', 'store_name', 'address', 'phone', 'ntn', 'receipt_footer')
         read_only_fields = ('id', 'code')
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError('Branch name is required.')
+        return value
 
 
 class ProductSerializer(serializers.ModelSerializer):

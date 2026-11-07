@@ -1,4 +1,7 @@
-from django.db.models import ProtectedError, Q
+from decimal import Decimal
+
+from django.db.models import Count, ProtectedError, Q, Sum
+from django.db.models.functions import Coalesce
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -6,7 +9,6 @@ from rest_framework.views import APIView
 from audit.services import log_event
 from auth.permissions import requires
 from suppliers.models import Supplier, SupplierLedgerEntry
-from suppliers.services import post_supplier_entry
 from suppliers.serializers import (
     BulkDeleteSupplierSerializer,
     CreateSupplierSerializer,
@@ -16,6 +18,7 @@ from suppliers.serializers import (
     SupplierPaymentInput,
     UpdateSupplierSerializer,
 )
+from suppliers.services import due_dates, post_supplier_entry, with_standing
 
 
 class ListCreateSupplierDataView(APIView):
@@ -63,6 +66,12 @@ class ListCreateSupplierDataView(APIView):
         if city:
             queryset = queryset.filter(city__iexact=city)
 
+        balance = request.query_params.get("balance")
+        if balance == "owed":
+            queryset = queryset.filter(credit_balance__gt=0)
+        elif balance == "settled":
+            queryset = queryset.filter(credit_balance__lte=0)
+
         # ----------------------------
         # Sorting
         # ----------------------------
@@ -99,15 +108,19 @@ class ListCreateSupplierDataView(APIView):
         page_size = min(max(page_size, 1), 100)
 
         total_count = queryset.count()
+        owed = Supplier.objects.filter(credit_balance__gt=0).aggregate(
+            total=Coalesce(Sum("credit_balance"), Decimal(0)), suppliers=Count("id"),
+        )
 
         start = (page - 1) * page_size
         end = start + page_size
 
-        queryset = queryset[start:end]
+        rows = list(with_standing(queryset)[start:end])
 
         serializer = SupplierListSerializer(
-            queryset,
+            rows,
             many=True,
+            context={"due_dates": due_dates(rows)},
         )
 
         return Response(
@@ -116,6 +129,12 @@ class ListCreateSupplierDataView(APIView):
                 "page": page,
                 "page_size": page_size,
                 "results": serializer.data,
+                "total_owed": owed["total"],
+                "suppliers_owed": owed["suppliers"],
+                "cities": list(
+                    Supplier.objects.exclude(city__isnull=True).exclude(city="")
+                    .values_list("city", flat=True).distinct().order_by("city")[:200]
+                ),
             },
             status=status.HTTP_200_OK,
         )

@@ -3,6 +3,7 @@ from django.urls import path
 from auth.views import (
     LoginView,
     LogoutView,
+    PinLoginView,
     RolePermissionsView,
     SessionView,
     SwitchByPinView,
@@ -14,6 +15,7 @@ urlpatterns = [
     path('session/', SessionView.as_view()),
     path('login/', LoginView.as_view()),
     path('logout/', LogoutView.as_view()),
+    path('pin-login/', PinLoginView.as_view()),
     path('switch-pin/', SwitchByPinView.as_view()),
     path('roles/', RolePermissionsView.as_view()),
     path('users/', UserListCreateView.as_view()),

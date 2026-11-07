@@ -24,6 +24,9 @@ export const useThemeStore = create<ThemeState>()(
 interface AuthState {
   user: User | null;
   loading: boolean;
+  /** This browser is a till where staff signed in before, so cashiers may use their PIN on the login screen. */
+  pinSignIn: boolean;
+  pinLogin: (pin: string) => Promise<void>;
   load: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   switchPin: (pin: string) => Promise<void>;
@@ -34,10 +37,11 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   loading: true,
+  pinSignIn: false,
   load: async () => {
     try {
       const { data } = await authApi.session();
-      set({ user: data.user, loading: false });
+      set({ user: data.user, loading: false, pinSignIn: !!data.pin_sign_in });
     } catch {
       set({ user: null, loading: false });
     }
@@ -45,6 +49,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (email, password) => {
     const { data } = await authApi.login(email, password);
     set({ user: data.user });
+  },
+  pinLogin: async (pin) => {
+    const { data } = await authApi.pinLogin(pin);
+    set({ user: data.user, pinSignIn: true });
   },
   switchPin: async (pin) => {
     const { data } = await authApi.switchPin(pin);

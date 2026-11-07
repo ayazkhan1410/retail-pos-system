@@ -10,8 +10,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from audit.models import AuditLog
+from audit.services import log_event
 from auth.permissions import requires
 from customers.models import Customer
+from finance.services.overview import orders_summary
 from inventory.models import Product, StockLevel, default_branch
 from sales.models import HeldBill, Payment, Sale, SaleLine, SaleReturn, Shift, Terminal
 from sales.serializers import (
@@ -35,8 +37,11 @@ class SalePagination(PageNumberPagination):
 
 
 class SaleFilterInput(serializers.Serializer):
-    search = serializers.CharField(required=False, allow_blank=True)
+    search = serializers.CharField(required=False, allow_blank=True, max_length=100)
     terminal = serializers.IntegerField(required=False)
+    cashier = serializers.IntegerField(required=False)
+    method = serializers.ChoiceField(choices=Payment.Method.choices, required=False, allow_blank=True)
+    status = serializers.ChoiceField(choices=['khata', 'offline', 'returned'], required=False, allow_blank=True)
     to = serializers.DateField(required=False)
 
     def get_fields(self):
@@ -44,10 +49,83 @@ class SaleFilterInput(serializers.Serializer):
         return {**super().get_fields(), 'from': serializers.DateField(required=False)}
 
 
-class TerminalListView(generics.ListAPIView):
-    queryset = Terminal.objects.filter(active=True)
+def filter_sales(queryset, params):
+    """Applies SaleFilterInput values; shared by the list and its summary so the numbers always match the table."""
+    if params.get('search'):
+        search = params['search'].strip()
+        queryset = queryset.filter(
+            Q(invoice_no__icontains=search) | Q(customer__name__icontains=search) | Q(customer__phone__icontains=search)
+        )
+    if params.get('terminal'):
+        queryset = queryset.filter(terminal_id=params['terminal'])
+    if params.get('cashier'):
+        queryset = queryset.filter(cashier_id=params['cashier'])
+    if params.get('method'):
+        queryset = queryset.filter(payments__method=params['method']).distinct()
+    status_filter = params.get('status')
+    if status_filter == 'khata':
+        queryset = queryset.filter(payments__method=Payment.Method.CREDIT).distinct()
+    elif status_filter == 'offline':
+        queryset = queryset.filter(is_offline=True)
+    elif status_filter == 'returned':
+        queryset = queryset.filter(returns__isnull=False).distinct()
+    return queryset
+
+
+class TerminalListView(generics.ListCreateAPIView):
+    """Registers. Everyone signed in can list them (the till needs it); only store settings can add one."""
+
+    permission_classes = [requires(write='settings.store')]
     serializer_class = TerminalSerializer
     pagination_class = None
+
+    def get_queryset(self):
+        queryset = Terminal.objects.all()
+        if self.request.query_params.get('include_inactive') != '1':
+            queryset = queryset.filter(active=True)
+        return queryset
+
+    def perform_create(self, serializer):
+        terminal = serializer.save(branch=default_branch())
+        log_event(self.request.user, 'terminal_created', terminal.name, {'code': terminal.code})
+
+
+class TerminalDetailView(generics.UpdateAPIView):
+    permission_classes = [requires(write='settings.store')]
+    serializer_class = TerminalSerializer
+    queryset = Terminal.objects.all()
+    http_method_names = ['patch']
+
+    def perform_update(self, serializer):
+        terminal = serializer.instance
+        if serializer.validated_data.get('active') is False and Shift.objects.filter(terminal=terminal, closed_at__isnull=True).exists():
+            raise serializers.ValidationError({'detail': f'Close the open shift on {terminal.name} first.'})
+        terminal = serializer.save()
+        log_event(self.request.user, 'terminal_updated', terminal.name, {'fields': sorted(serializer.validated_data)})
+
+
+class SaleSummaryView(APIView):
+    """KPIs above the Orders table, for the same filters as the table."""
+
+    permission_classes = [requires('sales.view')]
+
+    def get(self, request):
+        filters = SaleFilterInput(data=request.query_params)
+        filters.is_valid(raise_exception=True)
+        params = filters.validated_data
+        today = timezone.localdate()
+        end = params.get('to') or today
+        start = params.get('from') or end
+        if start > end:
+            raise serializers.ValidationError({'from': 'Start date is after the end date.'})
+        if (end - start).days > 366:
+            raise serializers.ValidationError({'from': 'Pick a range of a year or less.'})
+        data = orders_summary(filter_sales(Sale.objects.all(), params), start, end)
+        data['cashiers'] = list(
+            Sale.objects.filter(created_at__date__gte=today - timedelta(days=90))
+            .values('cashier_id', 'cashier__full_name').distinct().order_by('cashier__full_name')
+        )
+        return Response(data)
 
 
 class SaleListCreateView(APIView):
@@ -60,10 +138,7 @@ class SaleListCreateView(APIView):
         filters = SaleFilterInput(data=request.query_params)
         filters.is_valid(raise_exception=True)
         params = filters.validated_data
-        if params.get('search'):
-            queryset = queryset.filter(invoice_no__icontains=params['search'])
-        if params.get('terminal'):
-            queryset = queryset.filter(terminal_id=params['terminal'])
+        queryset = filter_sales(queryset, params)
         if params.get('from'):
             queryset = queryset.filter(created_at__date__gte=params['from'])
         if params.get('to'):

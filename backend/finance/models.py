@@ -20,6 +20,10 @@ class Expense(models.Model):
     method = models.CharField(max_length=20, default='cash')
     note = models.CharField(max_length=255, blank=True)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    # Set when the cash came out of a till drawer, so that shift's expected cash goes down.
+    shift = models.ForeignKey(
+        'sales.Shift', null=True, blank=True, on_delete=models.PROTECT, related_name='expenses',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

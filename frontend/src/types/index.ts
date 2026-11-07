@@ -103,15 +103,18 @@ export interface Branch {
   id: number;
   code: string;
   name: string;
+  store_name: string;
   address: string;
   phone: string;
   ntn: string;
+  receipt_footer: string;
 }
 
 export interface Terminal {
   id: number;
   code: string;
   name: string;
+  active?: boolean;
 }
 
 export interface Shift {
@@ -151,6 +154,9 @@ export interface Sale {
   cashier_name: string;
   customer: number | null;
   customer_name: string;
+  customer_phone?: string;
+  customer_balance?: string | null;
+  status?: 'paid' | 'khata' | 'offline' | 'part_returned' | 'returned';
   is_offline: boolean;
   returned_total: string;
   subtotal: string;
@@ -219,9 +225,14 @@ export interface Customer {
   name: string;
   phone: string | null;
   address: string;
+  area?: string;
   credit_limit: string;
   balance: string;
   active: boolean;
+  created_at?: string;
+  last_visit?: string | null;
+  visits?: number | null;
+  segments?: ('regular' | 'khata' | 'over_limit' | 'at_risk' | 'new')[];
 }
 
 export interface LedgerEntry {
@@ -242,6 +253,8 @@ export interface Expense {
   method: string;
   note: string;
   user_name: string;
+  terminal_name?: string;
+  created_at?: string;
 }
 
 export interface FinancialReport {
@@ -333,6 +346,8 @@ export interface GRN {
   supplier_name?: string;
   date: string;
   po_no: string;
+  supplier_invoice_no?: string;
+  created_by_name?: string;
   payment_type: 'credit' | 'cash';
   disc_percent: string;
   flat_disc: string;

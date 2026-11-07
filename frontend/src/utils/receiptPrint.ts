@@ -1,5 +1,5 @@
-import { inventoryApi } from '@/services/endpoints';
-import type { Branch, Sale } from '@/types';
+import { displayName, loadStoreDetails } from './storeDetails';
+import type { Sale } from '@/types';
 import { escapeHtml } from './labelPrint';
 import { formatCurrency, formatDate } from './index';
 
@@ -16,17 +16,7 @@ function row(label: string, value: string, bold = false) {
   return `<div class="row"><${tag}>${escapeHtml(label)}</${tag}><${tag}>${escapeHtml(value)}</${tag}></div>`;
 }
 
-const STORE_CACHE = 'smartshop-store-details';
-
-async function loadStore(): Promise<Pick<Branch, 'name' | 'address' | 'phone' | 'ntn'>> {
-  try {
-    const { data } = await inventoryApi.branch();
-    localStorage.setItem(STORE_CACHE, JSON.stringify(data));
-    return data;
-  } catch {
-    return JSON.parse(localStorage.getItem(STORE_CACHE) ?? 'null') ?? { name: 'Tijori POS', address: '', phone: '', ntn: '' };
-  }
-}
+const loadStore = loadStoreDetails;
 
 export async function printReceipt(sale: Sale) {
   const store = await loadStore();
@@ -50,7 +40,8 @@ export async function printReceipt(sale: Sale) {
     hr { border: 0; border-top: 1px dashed #000; margin: 5px 0; }
     .total { font-size: 15px; }
   </style></head><body>
-    <h1>${escapeHtml(store.name)}</h1>
+    <h1>${escapeHtml(displayName(store))}</h1>
+    ${store.store_name && store.name ? `<p class="center">${escapeHtml(store.name)}</p>` : ''}
     ${store.address ? `<p class="center">${escapeHtml(store.address)}</p>` : ''}
     ${store.phone ? `<p class="center">${escapeHtml(store.phone)}</p>` : ''}
     ${store.ntn ? `<p class="center">NTN: ${escapeHtml(store.ntn)}</p>` : ''}
@@ -72,7 +63,7 @@ export async function printReceipt(sale: Sale) {
     ${payments}
     ${Number(sale.change_due) ? row('Change', formatCurrency(Number(sale.change_due))) : ''}
     <hr/>
-    <p class="center">Thank you for shopping with us</p>
+    <p class="center">${escapeHtml(store.receipt_footer?.trim() || 'Thank you for shopping with us')}</p>
   </body></html>`;
 
   // A hidden frame, because this runs after a network call and browsers block pop-ups opened that late.

@@ -22,6 +22,9 @@ class Branch(models.Model):
     address = models.TextField(blank=True)
     phone = models.CharField(max_length=30, blank=True)
     ntn = models.CharField(max_length=30, blank=True)
+    # Trading name on receipts ("Al-Madina Mart"); `name` is the branch ("Gulberg branch").
+    store_name = models.CharField(max_length=255, blank=True)
+    receipt_footer = models.TextField(blank=True)
 
     def __str__(self):
         return self.name

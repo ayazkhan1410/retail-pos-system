@@ -1,31 +1,44 @@
 import { useThemeStore } from '@/store';
 
+/** Tailwind classes for the design's categorical colours, in order: ink, indigo, teal, amber, grey. */
+export const SERIES_CLASSES = [
+  'bg-brand-900 dark:bg-brand-100',
+  'bg-accent',
+  'bg-cyan-500',
+  'bg-amber-500',
+  'bg-brand-300 dark:bg-brand-600',
+];
+
 /** Recharts takes literal colours, so the palette is resolved here per theme instead of in CSS. */
 export function useChartTheme() {
   const dark = useThemeStore((state) => state.theme) === 'dark';
+  const accent = dark ? '#8a84ff' : '#635bff';
   return {
     dark,
-    grid: dark ? '#232c27' : '#e7ece9',
-    axis: dark ? '#67746d' : '#94a19a',
-    cursor: dark ? 'rgb(255 255 255 / 0.04)' : 'rgb(1 65 28 / 0.05)',
-    muted: dark ? '#37423c' : '#dfe5e2',
-    // Brand green first; the rest are distinguishable without relying on hue alone.
+    accent,
+    accentFill: dark ? 'rgba(138,132,255,0.16)' : 'rgba(99,91,255,0.10)',
+    grid: dark ? '#23252a' : '#ececef',
+    axis: dark ? '#6b7079' : '#9a9ea6',
+    cursor: dark ? 'rgb(255 255 255 / 0.04)' : 'rgb(15 17 21 / 0.04)',
+    muted: dark ? '#3f434a' : '#d3d4d9',
+    previous: dark ? '#6b7079' : '#c3c5cb',
+    // Ink, Tijori indigo, teal, amber, grey — readable without relying on hue alone.
     series: dark
-      ? ['#56cd8a', '#8fa8b8', '#e0a548', '#c792d8']
-      : ['#01411c', '#5f7f93', '#b7791f', '#8b5a9e'],
-    highlight: dark ? '#56cd8a' : '#01411c',
+      ? ['#e6e6ea', '#8a84ff', '#22b8cf', '#f0b43c', '#4b4f57']
+      : ['#0f1115', '#635bff', '#0ea5b7', '#d9900f', '#d3d4d9'],
+    highlight: accent,
     tooltip: {
       contentStyle: {
-        borderRadius: 10,
-        border: `1px solid ${dark ? '#37423c' : '#dfe5e2'}`,
-        background: dark ? '#161d19' : '#ffffff',
-        boxShadow: '0 10px 30px -12px rgb(16 29 22 / 0.25)',
+        borderRadius: 8,
+        border: 'none',
+        background: dark ? '#f1f1f3' : '#0f1115',
+        boxShadow: '0 10px 30px -12px rgb(16 17 20 / 0.35)',
         fontSize: 12,
-        padding: '8px 12px',
+        padding: '6px 10px',
       },
-      labelStyle: { color: dark ? '#eef2f0' : '#161d19', fontWeight: 600, marginBottom: 4 },
-      itemStyle: { color: dark ? '#c6cfca' : '#4c5852', padding: 0 },
+      labelStyle: { color: dark ? '#4b4f57' : '#9a9ea6', fontWeight: 500, marginBottom: 2 },
+      itemStyle: { color: dark ? '#0f1115' : '#ffffff', padding: 0, fontWeight: 600 },
     },
-    tick: { fontSize: 11, fill: dark ? '#67746d' : '#94a19a' },
+    tick: { fontSize: 11, fill: dark ? '#6b7079' : '#9a9ea6' },
   };
 }

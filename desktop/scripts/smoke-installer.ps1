@@ -15,12 +15,15 @@ $installRoot = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'Tijori'
 $dataRoot = Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'Tijori'
 $client = Join-Path $installRoot 'resources/service/TijoriService.exe'
 $firewallName = 'TijoriPOS-Private'
-$runKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+function Get-TijoriStartup {
+    # Get-ItemPropertyValue throws for a missing value, even with SilentlyContinue.
+    [Microsoft.Win32.Registry]::GetValue('HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Run', 'Tijori POS', $null)
+}
 $userConfig = Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'Tijori/config.json'
 if ((Get-Service TijoriRuntime -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $installRoot) -or
     (Test-Path -LiteralPath $dataRoot) -or (Test-Path -LiteralPath $userConfig) -or
     (Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue) -or
-    (Get-ItemPropertyValue -LiteralPath $runKey -Name 'Tijori POS' -ErrorAction SilentlyContinue)) {
+    (Get-TijoriStartup)) {
     throw 'The CI machine already contains a Tijori installation, database, config, or firewall rule.'
 }
 
@@ -87,7 +90,7 @@ function Test-InstallationPolicy {
         throw 'The firewall rule must be limited to the local subnet.'
     }
     $launcher = Join-Path $installRoot 'Tijori POS.exe'
-    if (!(Test-Path -LiteralPath $launcher) -or (Get-ItemPropertyValue -LiteralPath $runKey -Name 'Tijori POS').Trim('"') -ne $launcher) {
+    if (!(Test-Path -LiteralPath $launcher) -or ([string](Get-TijoriStartup)).Trim('"') -ne $launcher) {
         throw 'The Windows startup entry does not launch the installed application.'
     }
     $shell = New-Object -ComObject WScript.Shell
@@ -183,6 +186,21 @@ try {
     $null = Confirm-Dump $beforeUpdate 'update'
     $null = Invoke-Bridge 'stop'
     Write-Host 'Installed setup, login, register API, backup, and shutdown passed.'
+} catch {
+    $reason = [Microsoft.Win32.Registry]::GetValue('HKEY_LOCAL_MACHINE\SOFTWARE\Tijori POS\Installer', 'LastError', $null)
+    if ($reason) { Write-Host "Installer helper reported: $reason" }
+    foreach ($name in 'service.log', 'server.log', 'postgres-tools.log') {
+        $logPath = Join-Path $dataRoot "logs/$name"
+        if (Test-Path -LiteralPath $logPath) {
+            Write-Host "Last lines of $name"
+            Get-Content -Tail 25 -LiteralPath $logPath
+        }
+    }
+    try {
+        Get-WinEvent -FilterHashtable @{ LogName='System'; ProviderName='Service Control Manager'; StartTime=(Get-Date).AddMinutes(-15) } |
+            Where-Object { $_.Message -match 'Tijori' } | Select-Object -First 3 -ExpandProperty Message | Write-Host
+    } catch { Write-Host 'No additional service events were available.' }
+    throw
 } finally {
     try {
         if ($installed) {
@@ -197,7 +215,7 @@ try {
 }
 if ((Get-Service TijoriRuntime -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $client) -or
     (Get-NetFirewallRule -Name $firewallName -ErrorAction SilentlyContinue) -or
-    (Get-ItemPropertyValue -LiteralPath $runKey -Name 'Tijori POS' -ErrorAction SilentlyContinue)) {
+    (Get-TijoriStartup)) {
     throw 'Uninstall left a service, installed bridge, firewall rule, or automatic startup entry.'
 }
 foreach ($file in @('pgdata/PG_VERSION','pgdata/global/pg_control','state/machine.json','tijori.env')) {

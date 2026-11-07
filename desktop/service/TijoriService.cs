@@ -33,8 +33,8 @@ internal sealed class TijoriService : ServiceBase {
             try {
                 Console.InputEncoding = Utf8;
                 Console.OutputEncoding = Utf8;
-                using (var client = new NamedPipeClientStream(".", PipeName, PipeDirection.InOut,
-                           PipeOptions.None, TokenImpersonationLevel.Identification)) {
+                using (var client = new NamedPipeClientStream(".", PipeName, PipeAccessRights.ReadWrite,
+                           PipeOptions.None, TokenImpersonationLevel.Identification, HandleInheritability.None)) {
                     client.Connect(15000);
                     uint pid;
                     if (!GetNamedPipeServerProcessId(client.SafePipeHandle, out pid) || pid != ServicePid())

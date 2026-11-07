@@ -30,26 +30,38 @@ function shouldShowPrice(price: number): boolean {
   return price > 0;
 }
 
-export function printProductLabels(product: Product, options: LabelPrintOptions = {}) {
-  const copies = Math.max(1, options.copies ?? 1);
-  const code = getItemCode(product);
-  const barcodeSvg = buildLabelSvg(code);
-  const showPrice = options.showPrice ?? shouldShowPrice(product.price);
-  const priceLine = showPrice ? formatCurrency(product.price) : '';
+/** What the till charges, so the shelf label never disagrees with the bill. */
+function labelPrice(product: Product): number {
+  return product.salePrice || product.price;
+}
 
-  const labels = Array.from({ length: copies }, () => `
+function labelHtml(product: Product, copies: number, showPrice?: boolean): string {
+  const barcodeSvg = buildLabelSvg(getItemCode(product));
+  const price = labelPrice(product);
+  const priceLine = (showPrice ?? shouldShowPrice(price)) ? formatCurrency(price) : '';
+  return Array.from({ length: Math.max(1, copies) }, () => `
     <div class="label">
       <div class="name">${escapeHtml(product.name)}</div>
       ${priceLine ? `<div class="price">${escapeHtml(priceLine)}</div>` : ''}
       <div class="barcode">${barcodeSvg}</div>
     </div>
   `).join('');
+}
+
+export function printProductLabels(product: Product, options: LabelPrintOptions = {}) {
+  printLabelBatch([{ product, copies: options.copies ?? 1 }], options.showPrice, product.name);
+}
+
+/** One print job for several products (Products → select rows → Print labels). */
+export function printLabelBatch(items: { product: Product; copies: number }[], showPrice?: boolean, title = 'Labels') {
+  if (items.length === 0) return;
+  const labels = items.map((item) => labelHtml(item.product, item.copies, showPrice)).join('');
 
   const html = `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Label — ${escapeHtml(product.name)}</title>
+  <title>Label — ${escapeHtml(title)}</title>
   <style>
     @page { size: ${LABEL_WIDTH_MM}mm ${LABEL_HEIGHT_MM}mm; margin: 0; }
     * { box-sizing: border-box; margin: 0; padding: 0; }

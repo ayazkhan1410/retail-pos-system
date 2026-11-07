@@ -43,7 +43,7 @@ export default function LabelPrintModal({ product, open, onClose }: LabelPrintMo
   if (!product) return null;
 
   const code = getItemCode(product);
-  const showPrice = product.price > 0;
+  const showPrice = (product.salePrice || product.price) > 0;
 
   return (
     <Modal
@@ -75,7 +75,7 @@ export default function LabelPrintModal({ product, open, onClose }: LabelPrintMo
         >
           <p className="line-clamp-2 text-[8pt] font-bold leading-tight">{product.name}</p>
           {showPrice && (
-            <p className="text-[9pt] font-bold">{formatCurrency(product.price)}</p>
+            <p className="text-[9pt] font-bold">{formatCurrency(product.salePrice || product.price)}</p>
           )}
           <svg ref={barcodeRef} className="max-h-[11mm] w-full" />
         </div>

@@ -72,6 +72,8 @@ export interface Supplier {
   notes?: string;
   status: 'active' | 'inactive';
   paymentType: 'credit' | 'cash';
+  /** Days of credit from each delivery; null = no agreed terms. */
+  paymentTermsDays?: number | null;
   currentBalance: number;
   totalPurchases: number;
   createdAt: string;
@@ -336,6 +338,8 @@ export interface GRNLine {
   unit_cost?: string;
   margin_percent?: string;
   line_total?: string;
+  /** Cost before this delivery (from the API on saved GRNs). */
+  previous_cost?: string | null;
 }
 
 export interface GRN {
@@ -348,6 +352,7 @@ export interface GRN {
   po_no: string;
   supplier_invoice_no?: string;
   created_by_name?: string;
+  void_reason?: string;
   payment_type: 'credit' | 'cash';
   disc_percent: string;
   flat_disc: string;

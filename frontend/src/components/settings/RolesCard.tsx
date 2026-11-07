@@ -1,15 +1,20 @@
 import { useEffect, useState } from 'react';
-import { ShieldCheck } from 'lucide-react';
-import { Card, CardHeader, CardTitle } from '@/components/ui';
+import { Plus } from 'lucide-react';
+import { Button } from '@/components/ui';
+import { Panel, Toggle } from '@/components/ui/Kit';
 import { apiErrorMessage, authApi } from '@/services';
 import { useTranslation } from '@/i18n';
 import { ROLE_LABEL_KEYS } from '@/utils';
 import type { RoleMatrix } from '@/types';
 
-export default function RolesCard() {
+const ROLE_ORDER = ['manager', 'cashier', 'stock_keeper', 'accountant'];
+
+/** What each role can do. Owners always have everything, so that column is shown on and locked. */
+export default function RolesCard({ onInvite }: { onInvite?: () => void }) {
   const { t } = useTranslation();
   const [matrix, setMatrix] = useState<RoleMatrix | null>(null);
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
 
   useEffect(() => {
     authApi.roles().then(({ data }) => setMatrix(data)).catch((err) => setError(apiErrorMessage(err, t('settings.staffSaveFailed'))));
@@ -19,57 +24,62 @@ export default function RolesCard() {
     if (!matrix) return;
     const permissions = on ? [...matrix.roles[role], code] : matrix.roles[role].filter((item) => item !== code);
     setError('');
+    setBusy(`${role}:${code}`);
     try {
       const { data } = await authApi.updateRole(role, permissions);
       setMatrix(data);
     } catch (err) {
       setError(apiErrorMessage(err, t('settings.staffSaveFailed')));
+    } finally {
+      setBusy('');
     }
   };
 
-  const roles = matrix ? Object.keys(matrix.roles) : [];
+  const roles = matrix ? ROLE_ORDER.filter((role) => role in matrix.roles) : [];
 
   return (
-    <Card hover>
-      <CardHeader>
-        <div>
-          <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" /> {t('settings.rolesTitle')}</CardTitle>
-          <p className="mt-0.5 text-xs text-brand-500">{t('settings.rolesHint')}</p>
-        </div>
-      </CardHeader>
-      {error && <p role="alert" className="mb-3 text-sm text-red-600">{error}</p>}
+    <Panel
+      title={t('pg.settings.staffRoles')}
+      subtitle={t('pg.settings.staffRolesHint')}
+      action={onInvite && <Button variant="outline" size="sm" onClick={onInvite}><Plus className="h-4 w-4" /> {t('pg.settings.invite')}</Button>}
+    >
+      {error && <p role="alert" className="mx-5 mb-3 text-sm text-red-600">{error}</p>}
       {matrix && (
         <div className="overflow-x-auto">
-          <table className="data-table">
+          <table className="w-full min-w-[620px] text-sm">
             <thead>
-              <tr>
-                <th className="py-2 pr-3 font-medium">{t('settings.permission')}</th>
-                {roles.map((role) => (
-                  <th key={role} className="px-2 py-2 text-center font-medium">{t(ROLE_LABEL_KEYS[role])}</th>
-                ))}
+              <tr className="border-y border-brand-100 text-[13px] text-brand-500 dark:border-brand-800">
+                <th className="px-5 py-2.5 text-start font-normal">{t('settings.permission')}</th>
+                <th className="px-3 py-2.5 text-center font-normal">{t(ROLE_LABEL_KEYS.owner)}</th>
+                {roles.map((role) => <th key={role} className="px-3 py-2.5 text-center font-normal">{t(ROLE_LABEL_KEYS[role])}</th>)}
               </tr>
             </thead>
             <tbody>
-              {matrix.permissions.map((code) => (
-                <tr key={code} className="border-b border-brand-50 dark:border-brand-800/40">
-                  <td className="py-1.5 pr-3">{t(`perms.${code.replace('.', '_')}`)}</td>
-                  {roles.map((role) => (
-                    <td key={role} className="px-2 py-1.5 text-center">
-                      <input
-                        type="checkbox"
-                        aria-label={`${t(ROLE_LABEL_KEYS[role])}: ${t(`perms.${code.replace('.', '_')}`)}`}
-                        className="h-4 w-4 accent-accent"
-                        checked={matrix.roles[role].includes(code)}
-                        onChange={(e) => void toggle(role, code, e.target.checked)}
-                      />
-                    </td>
-                  ))}
-                </tr>
-              ))}
+              {matrix.permissions.map((code) => {
+                const label = t(`perms.${code.replace('.', '_')}`);
+                return (
+                  <tr key={code} className="border-b border-brand-100 last:border-0 dark:border-brand-800">
+                    <td className="px-5 py-2.5 text-brand-900 dark:text-white">{label}</td>
+                    <td className="px-3 py-2.5 text-center"><span className="inline-flex"><Toggle checked disabled label={`${t(ROLE_LABEL_KEYS.owner)}: ${label}`} onChange={() => undefined} /></span></td>
+                    {roles.map((role) => (
+                      <td key={role} className="px-3 py-2.5 text-center">
+                        <span className="inline-flex">
+                          <Toggle
+                            checked={matrix.roles[role].includes(code)}
+                            disabled={busy === `${role}:${code}`}
+                            label={`${t(ROLE_LABEL_KEYS[role])}: ${label}`}
+                            onChange={(on) => void toggle(role, code, on)}
+                          />
+                        </span>
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
-    </Card>
+    </Panel>
   );
 }

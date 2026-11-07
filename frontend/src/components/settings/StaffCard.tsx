@@ -11,7 +11,8 @@ const emptyForm = {
   email: '', full_name: '', role: 'cashier' as UserRole, password: '', pin: '', is_active: true,
 };
 
-export default function StaffCard() {
+/** `addRequest` opens the add form whenever it changes (Settings → Staff and roles → Invite staff). */
+export default function StaffCard({ addRequest = 0 }: { addRequest?: number }) {
   const { t } = useTranslation();
   const me = useAuthStore((state) => state.user);
   const [users, setUsers] = useState<User[]>([]);
@@ -33,6 +34,11 @@ export default function StaffCard() {
     setError('');
     setOpen(true);
   };
+
+  useEffect(() => {
+    if (addRequest) show(null);
+    // Only when the request number changes.
+  }, [addRequest]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();

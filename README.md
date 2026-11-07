@@ -89,6 +89,12 @@ docker compose exec backend python manage.py test
 cd frontend && npm run lint && npm run build
 ```
 
+Browser check of the redesigned pages (till sale, khata via F6, drawer expense, PIN sign-in, returns):
+
+```sh
+cd e2e && npm install && BASE=http://localhost:3000 PASSWORD=<seed_demo password> node design.mjs
+```
+
 ## Stack
 
 | Layer | Tech |

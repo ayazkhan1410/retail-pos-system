@@ -21,7 +21,7 @@ Update checks use GitHub Releases. To distribute a tested version, publish the m
 
 ## Build from a clone
 
-The complete build sequence and version pins are in `.github/workflows/windows-installer.yml`. It builds the frontend, compiles the Django server and service, verifies the PostgreSQL archive's SHA-256, tests against a disposable database and builds the NSIS installer. The installed smoke test runs only on a clean GitHub-hosted Windows runner. Optional repository secrets `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` enable certificate signing.
+The complete build sequence and version pins are in `.github/workflows/windows-installer.yml`. It builds the frontend, compiles the Django server and service, verifies the PostgreSQL archive's SHA-256, tests against a disposable database and builds the NSIS installer. After staging the server and PostgreSQL, run `desktop/scripts/stage-vc-runtime.ps1` on the build machine with Visual Studio's x64 C++ redistributable files installed. This bundles the Microsoft runtime needed on a fresh shop PC. The installed smoke test runs only on a clean GitHub-hosted Windows runner. Optional repository secrets `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` enable certificate signing.
 
 ## Physical Windows acceptance
 

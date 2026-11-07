@@ -1,0 +1,11 @@
+Tijori POS
+
+Install this software for use by your shop under the terms agreed with your
+Tijori POS provider. This installer includes third-party software. PostgreSQL,
+Electron, Chromium, Django and the other bundled components retain their
+respective licences. Inter is distributed under the SIL Open Font License.
+The relevant notices accompany the installed application and its components.
+
+The application stores the shop database, logs and backups on this computer.
+The uninstall wizard keeps these files unless you expressly choose to erase
+them.

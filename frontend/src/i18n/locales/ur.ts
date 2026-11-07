@@ -775,11 +775,11 @@ export const ur: TranslationKeys = {
     disconnected: 'منقطع',
     apiChecking: 'چیک ہو رہا ہے...',
     retryApi: 'دوبارہ کوشش',
-    apiDisconnectedHint: 'بیک اینڈ تک رسائی نہیں۔ Django چلائیں http://localhost:8000',
+    apiDisconnectedHint: 'دکان سے رابطہ نہیں ہو سکا۔ دیکھیں کہ مرکزی کمپیوٹر پر تجوری پی او ایس کھلا ہے۔',
     version: 'ورژن',
     backupDatabase: 'ڈیٹابیس بیک اپ',
     backupSuccess: 'بیک اپ محفوظ: {{file}} ({{size}})',
-    backupFailed: 'بیک اپ ناکام۔ Docker اور PostgreSQL چل رہے ہیں یقینی بنائیں۔',
+    backupFailed: 'بیک اپ محفوظ نہیں ہو سکا۔ مرکزی کمپیوٹر پر دستیاب جگہ چیک کریں۔',
   },
   notifications: {
     title: 'اطلاعات',

@@ -774,11 +774,11 @@ export const en = {
     disconnected: 'Disconnected',
     apiChecking: 'Checking...',
     retryApi: 'Retry',
-    apiDisconnectedHint: 'Cannot reach backend. Start Django on http://localhost:8000',
+    apiDisconnectedHint: 'Cannot reach the shop. Check that Tijori POS is open on the main computer.',
     version: 'Version',
     backupDatabase: 'Backup Database',
     backupSuccess: 'Backup saved: {{file}} ({{size}})',
-    backupFailed: 'Backup failed. Make sure Docker stack and PostgreSQL are running.',
+    backupFailed: 'The backup could not be saved. Check the main computer and its available disk space.',
   },
   notifications: {
     title: 'Notifications',

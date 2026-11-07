@@ -17,6 +17,8 @@ internal sealed class TijoriService : ServiceBase {
     const string NameOfService = "TijoriRuntime";
     const string PipeName = "pk.tijori.pos.runtime.v1";
     const int MaxRequest = 32768;
+    const int PipeTimeoutMs = 10000;
+    const byte ResponseReceived = 6;
     static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
     readonly object sync = new object();
     NamedPipeServerStream pipe;
@@ -43,9 +45,9 @@ internal sealed class TijoriService : ServiceBase {
                     if (!GetNamedPipeServerProcessId(client.SafePipeHandle, out pid) || pid != ServicePid())
                         throw new IOException("Tijori could not verify the local Windows service.");
                     stage = "exchanging the service request";
-                    string request = ReadLine(input, MaxRequest);
+                    string request = ReadLine(input, MaxRequest, allowFinalEof: true);
                     WriteLine(client, request);
-                    WriteLine(output, ReadLine(client, MaxRequest));
+                    WriteLine(output, ReceiveReply(client));
                 }
             } catch (Exception ex) {
                 Environment.ExitCode = 1;
@@ -125,17 +127,11 @@ internal sealed class TijoriService : ServiceBase {
     }
     void Listen() {
         while (!stopping) {
+            bool accepted = false;
             try {
                 pipe.WaitForConnection();
-                // Limit idle/malformed callers without timing out an active setup or backup.
-                string request;
-                var reading = System.Threading.Tasks.Task.Factory.StartNew(() => ReadLine(pipe, MaxRequest));
-                if (!reading.Wait(10000)) {
-                    pipe.Disconnect();
-                    try { reading.Wait(); } catch (AggregateException) { }
-                    continue;
-                }
-                request = reading.Result;
+                accepted = true;
+                string request = ReadLine(pipe, MaxRequest, timeoutMs: PipeTimeoutMs);
                 string reply;
                 lock (sync) {
                     if (stopping) return;
@@ -148,24 +144,69 @@ internal sealed class TijoriService : ServiceBase {
                     reply = worker.StandardOutput.ReadLine();
                     if (reply == null) throw new IOException("Tijori runtime exited.");
                 }
-                WriteLine(pipe, reply);
+                SendReply(pipe, reply, PipeTimeoutMs);
             } catch (Exception ex) {
                 if (!stopping) Log(ex.Message);
             } finally {
-                try { if (pipe.IsConnected) pipe.Disconnect(); } catch (ObjectDisposedException) { }
+                // A client that vanished can leave the server in the Broken state; disconnect it too.
+                try { if (accepted) pipe.Disconnect(); } catch (ObjectDisposedException) { }
             }
         }
     }
-    static string ReadLine(Stream stream, int max) {
+    static string ReceiveReply(Stream client) {
+        string reply = ReadLine(client, MaxRequest);
+        // Older services may already have disconnected after delivering a complete line.
+        try { client.WriteByte(ResponseReceived); client.Flush(); } catch (IOException) { }
+        return reply;
+    }
+
+    static void SendReply(NamedPipeServerStream server, string reply, int timeoutMs) {
+        byte[] frame = Utf8.GetBytes(reply + "\n");
+        if (frame.Length > MaxRequest + 1) throw new InvalidDataException("Reply exceeds size limit.");
+        var write = server.BeginWrite(frame, 0, frame.Length, null, null);
+        FinishPipeIo(server, write, op => { server.EndWrite(op); return 0; }, timeoutMs);
+        // DisconnectNamedPipe discards unread bytes. Keep the handle until the client read the newline.
+        byte[] ack = new byte[1];
+        var read = server.BeginRead(ack, 0, ack.Length, null, null);
+        if (FinishPipeIo(server, read, server.EndRead, timeoutMs) != 1 || ack[0] != ResponseReceived)
+            throw new IOException("Client did not acknowledge the reply.");
+    }
+
+    static int FinishPipeIo(NamedPipeServerStream server, IAsyncResult operation, Func<IAsyncResult, int> end, int timeoutMs) {
+        using (var completed = operation.AsyncWaitHandle) {
+            if (completed.WaitOne(Math.Max(0, timeoutMs))) return end(operation);
+            // Each connection processes one operation at a time. Cancel its pending overlapped I/O
+            // before reusing the server instance for another client.
+            CancelIoEx(server.SafePipeHandle, IntPtr.Zero);
+            try { end(operation); } catch (IOException) { }
+            throw new System.TimeoutException("The client timed out while transferring a service message.");
+        }
+    }
+    [DllImport("kernel32.dll", SetLastError=true)] static extern bool CancelIoEx(SafePipeHandle file, IntPtr overlapped);
+
+    static string ReadLine(Stream stream, int max, bool allowFinalEof = false, int timeoutMs = 0) {
         using (var buffer = new MemoryStream()) {
-            for (int i = 0; i <= max; ++i) {
-                int b = stream.ReadByte();
-                if (b == '\n' || (b == -1 && buffer.Length > 0)) return Utf8.GetString(buffer.ToArray());
-                if (b == -1) throw new EndOfStreamException();
-                buffer.WriteByte((byte)b);
+            byte[] chunk = new byte[4096];
+            var timer = timeoutMs > 0 ? Stopwatch.StartNew() : null;
+            while (true) {
+                int count;
+                if (timer == null) count = stream.Read(chunk, 0, chunk.Length);
+                else {
+                    var server = (NamedPipeServerStream)stream;
+                    var read = server.BeginRead(chunk, 0, chunk.Length, null, null);
+                    count = FinishPipeIo(server, read, server.EndRead, timeoutMs - (int)timer.ElapsedMilliseconds);
+                }
+                if (count == 0) {
+                    if (allowFinalEof && buffer.Length > 0) return Utf8.GetString(buffer.ToArray());
+                    throw new EndOfStreamException("Incomplete service message.");
+                }
+                int newline = Array.IndexOf(chunk, (byte)'\n', 0, count);
+                int length = newline < 0 ? count : newline;
+                if (buffer.Length + length > max) throw new InvalidDataException("Message exceeds size limit.");
+                buffer.Write(chunk, 0, length);
+                if (newline >= 0) return Utf8.GetString(buffer.ToArray());
             }
         }
-        throw new InvalidDataException("Message exceeds size limit.");
     }
     static void WriteLine(Stream stream, string value) {
         byte[] data = Utf8.GetBytes(value + "\n");

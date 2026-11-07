@@ -6,10 +6,13 @@
 
 !macro tijoriRun SCRIPT ARGUMENTS
   ${DisableX64FSRedirection}
-  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${SCRIPT}" ${ARGUMENTS}'
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${SCRIPT}" ${ARGUMENTS}'
   Pop $R7
+  Pop $R8
+  DetailPrint "$R8"
   ${EnableX64FSRedirection}
   ${If} $R7 != "0"
+    WriteRegStr HKLM "SOFTWARE\Tijori POS\Installer" "LastError" "$R8"
     MessageBox MB_ICONSTOP "Tijori setup could not finish this step. See the installer details." /SD IDOK
     SetErrorLevel 1
     Abort
@@ -46,6 +49,8 @@
   !insertmacro tijoriRun "$INSTDIR\resources\service\install.ps1" '-Mode Install -InstallDir "$INSTDIR"'
   !insertmacro tijoriRun "$PLUGINSDIR\maintenance.ps1" '-Action OpenFirewall -InstallDir "$INSTDIR"'
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "Tijori POS" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}"'
+  DeleteRegValue HKLM "SOFTWARE\Tijori POS\Installer" "LastError"
+  DeleteRegKey /ifempty HKLM "SOFTWARE\Tijori POS\Installer"
 !macroend
 
 !macro customUnWelcomePage

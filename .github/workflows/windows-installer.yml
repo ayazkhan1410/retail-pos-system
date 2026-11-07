@@ -43,8 +43,69 @@ jobs:
           python -m pip install -r backend/requirements.txt "Nuitka[standalone]==4.3.4" tzdata zstandard
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           npm ci --prefix desktop
+      - name: Test desktop setup and updates
+        working-directory: desktop
+        run: node --test
+      - name: Identify compiled server inputs
+        id: server-inputs
+        run: |
+          $tree = git rev-parse 'HEAD:backend'
+          if ($LASTEXITCODE -or -not $tree) { throw 'Cannot identify the backend source tree.' }
+          $pythonVersion = python -VV
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          # Pip's generated Windows console launchers can have install-time timestamps.
+          # Fingerprint installed package versions and wheel payloads inside site-packages.
+          $packages = @'
+          import hashlib, importlib.metadata, json
+          records = []
+          for dist in importlib.metadata.distributions():
+              files = sorted((p.as_posix(), p.hash.mode, p.hash.value) for p in dist.files or ()
+                             if p.hash and not p.is_absolute() and ".." not in p.parts and "__pycache__" not in p.parts)
+              records.append((dist.metadata["Name"].casefold(), dist.version, files))
+          print(hashlib.sha256(json.dumps(sorted(records), separators=(",", ":")).encode()).hexdigest())
+          '@ | python -
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -or -not $vs) { throw 'Cannot identify the Visual Studio C++ toolchain.' }
+          if (-not $env:ImageVersion -or -not $env:ImageOS) { throw 'Cannot identify the hosted Windows runner image.' }
+          $toolFiles = @(
+            (Get-Item (Get-Command python).Source)
+            (Get-Item desktop/scripts/build-server.ps1)
+            (Get-Item desktop/scripts/stage-vc-runtime.ps1)
+            (Get-ChildItem "$vs/VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe" -File)
+            (Get-ChildItem "$vs/VC/Tools/MSVC/*/bin/Hostx64/x64/link.exe" -File)
+            (Get-ChildItem "$vs/VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT/*.dll" -File)
+          )
+          if ($env:VCToolsRedistDir) {
+            $toolFiles += @(Get-ChildItem "$env:VCToolsRedistDir/x64/Microsoft.VC*.CRT/*.dll" -File)
+          }
+          if ('cl.exe' -notin $toolFiles.Name -or 'link.exe' -notin $toolFiles.Name -or 'vcruntime140.dll' -notin $toolFiles.Name) {
+            throw 'Compiler, linker, or Visual C++ redistributable files are missing.'
+          }
+          $files = @($toolFiles | Sort-Object FullName -Unique | ForEach-Object {
+            "$($_.FullName)=$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)"
+          })
+          $inputs = [ordered]@{
+            repository = $env:GITHUB_REPOSITORY_ID; ref = $env:GITHUB_REF
+            backendTree = $tree; python = $pythonVersion; installedPackages = $packages
+            image = $env:ImageOS; imageVersion = $env:ImageVersion; architecture = $env:RUNNER_ARCH
+            files = $files
+          } | ConvertTo-Json -Depth 4 -Compress
+          $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($inputs)))
+          "key=tijori-win-server-v1-$hash" >> $env:GITHUB_OUTPUT
+      - name: Restore exact compiled server
+        id: server-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          key: ${{ steps.server-inputs.outputs.key }}
+          path: desktop/build/server
+      - name: Reject a non-exact executable cache
+        if: steps.server-cache.outputs.cache-matched-key != '' && steps.server-cache.outputs.cache-hit != 'true'
+        run: throw 'Refusing to execute a compiled server from a non-exact cache match.'
       - name: Compile server, migrations, templates and static assets
-        run: ./desktop/scripts/build-server.ps1
+        if: steps.server-cache.outputs.cache-hit != 'true'
+        run: ./desktop/scripts/build-server.ps1 -Jobs ([Math]::Min(4, [Environment]::ProcessorCount))
       - name: Fetch pinned EDB PostgreSQL 16 x64 runtime
         run: python desktop/scripts/stage-postgres.py
       - name: Stage signed x64 Visual C++ runtime for clean shop PCs
@@ -55,6 +116,12 @@ jobs:
           & $csc /nologo /target:winexe /reference:System.ServiceProcess.dll /reference:System.Security.dll '/out:desktop\service\TijoriService.exe' 'desktop\service\TijoriService.cs'
       - name: Test compiled server on a disposable database
         run: ./desktop/scripts/smoke-server.ps1
+      - name: Cache the smoke-tested compiled server
+        if: success() && steps.server-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          key: ${{ steps.server-inputs.outputs.key }}
+          path: desktop/build/server
       - name: Build NSIS installer and update metadata
         working-directory: desktop
         env:
